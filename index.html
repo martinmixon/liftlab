@@ -394,10 +394,11 @@ const secName=id=>{const s=SECTIONS.find(k=>k.id===id);return s?s.name:'';};
 
 /* ============ state ============ */
 const DBKEY='liftlab.v1';
-const blank=()=>({settings:{units:'lbs'},custom:[],workouts:[],bodyweight:[],planned:[],active:null});
+const blank=()=>({settings:{units:'lbs',rest:[30,60,90]},custom:[],workouts:[],bodyweight:[],planned:[],active:null});
 let state=blank();
 try{const raw=localStorage.getItem(DBKEY); if(raw){state=Object.assign(blank(),JSON.parse(raw));}}catch(e){}
 state.custom.forEach(e=>{e.m=[].concat(e.m||e.g||'Other');}); // migrate single-group customs
+if(!Array.isArray(state.settings.rest)||state.settings.rest.length!==3)state.settings.rest=[30,60,90]; // migrate rest defaults
 const save=()=>{try{localStorage.setItem(DBKEY,JSON.stringify(state));}catch(e){toast('Could not save — storage unavailable');}};
 
 const UI={tab:'home',mode:state.active?'workout':null,exq:'',exg:'',metric:'top',
@@ -515,7 +516,7 @@ function viewHome(){
   </button>`:`
   <button class="btn primary" data-action="start-builder" style="margin-bottom:12px">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-    Start a Workout</button>`}
+    Create New Workout</button>`}
   ${state.planned.length?`<div class="eyebrow" style="margin:14px 0 8px">Planned</div>
   ${state.planned.map(p=>`<button class="card tap spread" style="width:100%;text-align:left;padding:12px 14px" data-action="plan-open" data-id="${p.id}">
     <div><div style="font-weight:700">${esc(p.name)}</div>
@@ -700,9 +701,7 @@ function viewWorkout(){
   </div>
   <div class="chips" style="margin-bottom:14px">
     <span class="tiny muted" style="align-self:center">Rest:</span>
-    <button class="chip" data-action="rest" data-sec="30">30s</button>
-    <button class="chip" data-action="rest" data-sec="60">60s</button>
-    <button class="chip" data-action="rest" data-sec="90">90s</button>
+    ${state.settings.rest.map(sec=>`<button class="chip" data-action="rest" data-sec="${sec}">${fmtSec(sec)}</button>`).join('')}
     ${(a.entries.some(e=>e.sec==='emom')||a.struct==='emom')?`<button class="chip on" data-action="rest" data-sec="60" data-rep="1">EMOM ↻</button>`:''}
   </div>
   ${(()=>{let last=null;return a.entries.map((en,ei)=>{
@@ -1037,6 +1036,13 @@ function settingsHTML(){
       <div class="seg"><button class="${!h?'on':''}" data-action="machines" data-id="show">Show</button>
       <button class="${h?'on':''}" data-action="machines" data-id="hide">Hide</button></div>
       <p class="tiny muted" style="margin:8px 0 0">Hides strength machines from the exercise lists. Cardio gear (bike, treadmill, rower) stays visible.</p></div>
+    <div class="card"><div class="eyebrow" style="margin-bottom:8px">Rest timer presets</div>
+      <div class="row" style="gap:8px">
+        ${state.settings.rest.map((sec,i)=>`<div class="fld" style="flex:1">
+          <input type="number" inputmode="numeric" min="5" max="900" step="5" value="${sec}" data-field="rest" data-i="${i}" aria-label="Rest preset ${i+1} in seconds">
+          <span class="tiny muted">s</span></div>`).join('')}
+      </div>
+      <p class="tiny muted" style="margin:8px 0 0">The three rest-timer buttons shown during a workout, in seconds.</p></div>
     <div class="card"><div class="eyebrow" style="margin-bottom:8px">Your data</div>
       <p class="tiny muted" style="margin:0 0 10px">${state.workouts.length} workouts · ${state.bodyweight.length} body-weight entries · ${state.custom.length} custom exercises. Data lives in this browser — export a backup to move devices.</p>
       <div class="stack">
@@ -1339,6 +1345,8 @@ document.addEventListener('input',e=>{
   if(!f)return;
   if(f==='w'||f==='r')setVal(el.dataset.ei,el.dataset.si,f,el.value);
   else if(f==='wnotes'){if(state.active){state.active.notes=el.value;save();}}
+  else if(f==='rest'){const v=Math.round(parseFloat(el.value));
+    if(!isNaN(v)&&v>=5&&v<=900){state.settings.rest[+el.dataset.i]=v;save();}}
   else if(f==='b-q'){UI.builder.q=el.value;const l=$('#pickerlist');if(l)l.innerHTML=pickerListHTML();}
   else if(f==='exq'){UI.exq=el.value;const l=$('#exlist');if(l)l.innerHTML=exListHTML();}
 });
