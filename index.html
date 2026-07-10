@@ -957,7 +957,9 @@ const ACT={
   'b-type':el=>{UI.builder.type=el.dataset.id;UI.builder.step=2;$('#sheet').innerHTML=builderHTML();},
   'b-struct':el=>{UI.builder.struct=el.dataset.id;UI.builder.step=3;$('#sheet').innerHTML=builderHTML();},
   'b-back':()=>{UI.builder.step--;$('#sheet').innerHTML=builderHTML();},
-  'b-eq':el=>{UI.builder.eq=el.dataset.id;$('#pickerlist').innerHTML=pickerListHTML();},
+  'b-eq':el=>{UI.builder.eq=el.dataset.id;
+    el.parentElement.querySelectorAll('.chip').forEach(c=>c.classList.toggle('on',c===el));
+    $('#pickerlist').innerHTML=pickerListHTML();},
   'b-toggle-ex':el=>{
     const b=UI.builder,id=el.dataset.id,i=b.sel.indexOf(id);
     if(i>=0)b.sel.splice(i,1);else b.sel.push(id);
