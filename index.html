@@ -440,6 +440,7 @@ function doneSets(en){return en.sets.filter(s=>s.done&&(s.w>0||s.r>0));}
 function sortedWorkouts(){return state.workouts.slice().sort((a,b)=>b.date<a.date?-1:1);}
 function lastPerf(exId){
   for(const w of sortedWorkouts()){
+    if(state.active&&state.active.editing===w.id)continue; // don't compare an edit against itself
     const en=w.entries.find(e=>e.ex===exId);
     if(en){const s=doneSets(en); if(s.length)return{date:w.date,sets:s};}
   }
@@ -507,7 +508,7 @@ function viewHome(){
   ${state.active?`
   <button class="card tap" style="width:100%;text-align:left;border-color:var(--brass)" data-action="resume">
     <div class="spread"><div>
-      <div class="eyebrow" style="color:var(--brass)">Workout in progress</div>
+      <div class="eyebrow" style="color:var(--brass)">${state.active.editing?'Editing workout':'Workout in progress'}</div>
       <div style="font-weight:800;font-size:17px;margin-top:2px">${esc(state.active.name)}</div>
       <div class="tiny muted num">${state.active.entries.length} exercises · started ${fmtDate(state.active.date)}</div>
     </div><div style="color:var(--brass);font-weight:800">Resume →</div></div>
@@ -719,6 +720,7 @@ function viewWorkout(){
 }
 function elapsedStr(){
   if(!state.active)return '';
+  if(state.active.editing)return 'editing · '+fmtDateY(state.active.date);
   const s=Math.floor((Date.now()-state.active.startedAt)/1000);
   return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')+' elapsed';
 }
@@ -779,15 +781,15 @@ function finishWorkout(){
   for(const en of kept){
     const ex=getEx(en.ex);if(!ex)continue;
     const fn=ex.t?(s=>s.r):(s=>epley(s.w,s.r));
-    const before=bestMetric(en.ex,fn);
+    const before=bestMetric(en.ex,fn,a.editing);
     const now=Math.max(...doneSets(en).map(fn));
     if(before>0&&now>before)prs.push(ex.name);
   }
-  const durMin=a.past?null:Math.max(1,Math.round((Date.now()-a.startedAt)/60000));
+  const durMin=a.editing?(a.dur||null):(a.past?null:Math.max(1,Math.round((Date.now()-a.startedAt)/60000)));
   const nSets=kept.reduce((acc,en)=>acc+doneSets(en).length,0);
   a._pending={vol,prs,durMin};
   openSheet(`<div class="grab"></div>
-    <div class="eyebrow">${a.past?'Logged for '+fmtDateY(a.date):'Nice work'}</div><h2 class="display" style="margin:4px 0 14px">${esc(a.name)}</h2>
+    <div class="eyebrow">${a.editing?'Editing · saves to '+fmtDateY(a.date):a.past?'Logged for '+fmtDateY(a.date):'Nice work'}</div><h2 class="display" style="margin:4px 0 14px">${esc(a.name)}</h2>
     <div class="tiles" style="grid-template-columns:repeat(3,1fr)">
       <div class="tile"><div class="v">${durMin==null?'—':durMin}</div><div class="u">minutes</div></div>
       <div class="tile"><div class="v">${nSets}</div><div class="u">sets</div></div>
@@ -964,6 +966,7 @@ function workoutDetailHTML(id){
       <div class="tiny muted num">Total volume: ${fmtVol(w.vol||0)} ${unit()}</div>
       <div class="row">
         <button class="btn ghost sm" data-action="w-copy" data-id="${w.id}">Copy</button>
+        <button class="btn ghost sm" data-action="w-edit" data-id="${w.id}">Edit</button>
         <button class="btn danger sm" data-action="del-workout" data-id="${w.id}">Delete</button>
       </div>
     </div>`;
@@ -1194,15 +1197,22 @@ const ACT={
   'rest-stop':()=>{restEnd=0;restRepeat=false;$('#restpill').hidden=true;},
   finish:()=>finishWorkout(),
   discard:el=>{if(!armed(el))return;
-    state.active=null;save();closeSheet();UI.mode=null;UI.tab='home';render();toast('Workout discarded');},
+    const wasEdit=state.active&&state.active.editing;
+    state.active=null;save();closeSheet();UI.mode=null;UI.tab='home';render();
+    toast(wasEdit?'Edit canceled — original kept':'Workout discarded');},
   'save-workout':()=>{
     const a=state.active,p=a._pending;delete a._pending;
+    const wasEdit=a.editing;delete a.editing;
     a.entries=a.entries.filter(en=>doneSets(en).length);
     a.entries.forEach(en=>{en.sets=en.sets.filter(s=>s.done&&(s.w>0||s.r>0));});
     a.vol=p.vol;a.prs=p.prs;a.dur=p.durMin;delete a.startedAt;delete a.past;
-    state.workouts.push(a);state.active=null;save();
+    if(wasEdit){
+      const i=state.workouts.findIndex(x=>x.id===wasEdit);
+      if(i>=0)state.workouts[i]=a;else state.workouts.push(a);
+    }else state.workouts.push(a);
+    state.active=null;save();
     closeSheet();UI.mode=null;UI.tab='home';render();
-    toast(p.prs.length?'Saved — '+p.prs.length+' new PR'+(p.prs.length>1?'s!':'!'):'Workout saved');},
+    toast(wasEdit?'Workout updated':p.prs.length?'Saved — '+p.prs.length+' new PR'+(p.prs.length>1?'s!':'!'):'Workout saved');},
   'ex-open':el=>{UI.metric='top';openSheet(exDetailHTML(el.dataset.id),'exdetail:'+el.dataset.id);},
   metric:el=>{UI.metric=el.dataset.id;
     const id=(sheetKind||'').split(':')[1];if(id)$('#sheet').innerHTML=exDetailHTML(id);},
@@ -1221,6 +1231,13 @@ const ACT={
     state.custom=state.custom.filter(e=>e.id!==el.dataset.id);
     save();closeSheet();render();toast('Deleted');},
   'w-open':el=>openSheet(workoutDetailHTML(el.dataset.id)),
+  'w-edit':el=>{
+    if(state.active){toast('Finish or discard your current workout first');return;}
+    const w=state.workouts.find(x=>x.id===el.dataset.id); if(!w)return;
+    state.active=JSON.parse(JSON.stringify(w));
+    state.active.editing=w.id;
+    state.active.startedAt=Date.now();
+    save();closeSheet();UI.mode='workout';render();},
   'w-copy':el=>{
     const w=state.workouts.find(x=>x.id===el.dataset.id); if(!w)return;
     const secs=[];let cur=null;

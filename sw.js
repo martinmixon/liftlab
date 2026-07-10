@@ -1,6 +1,6 @@
 // LiftLab service worker — app-shell cache so the app opens with no signal.
 // Bump CACHE on every deploy so clients pick up the new version.
-const CACHE = 'liftlab-v4';
+const CACHE = 'liftlab-v5';
 const ASSETS = ['./', 'index.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'];
 
 self.addEventListener('install', e => {
