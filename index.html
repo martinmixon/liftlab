@@ -162,6 +162,16 @@
   #restpill .t{font-weight:800;font-size:17px;font-variant-numeric:tabular-nums;color:var(--brass);}
   #restpill button{background:var(--card);border:1px solid var(--line);border-radius:999px;
     padding:6px 11px;font-size:12.5px;font-weight:700;color:var(--ink2);}
+  #amrappill{position:fixed;bottom:calc(86px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);
+    z-index:25;display:flex;align-items:center;gap:10px;background:var(--raised);border:1px solid var(--brass);
+    border-radius:999px;padding:8px 12px 8px 8px;box-shadow:0 8px 28px rgba(0,0,0,.5);}
+  #app.workout #amrappill{bottom:calc(18px + env(safe-area-inset-bottom));}
+  #amrappill .t{font-weight:800;font-size:17px;font-variant-numeric:tabular-nums;color:var(--brass);}
+  #amrappill .rds{font-weight:800;font-size:15px;color:var(--ink);min-width:20px;text-align:center;}
+  #amrappill .rds::after{content:' rds';font-size:11px;font-weight:600;color:var(--ink2);}
+  #amrappill .rbtn{background:var(--brass);color:#1A1205;border-radius:999px;padding:8px 14px;font-size:13.5px;font-weight:800;}
+  #amrappill button:not(.rbtn){background:var(--card);border:1px solid var(--line);border-radius:999px;
+    padding:6px 11px;font-size:12.5px;font-weight:700;color:var(--ink2);}
 
   /* sheets */
   #sheetwrap{position:fixed;inset:0;z-index:40;}
@@ -240,6 +250,12 @@
     <span class="t num" id="restt">1:30</span>
     <button data-action="rest-add">+30s</button>
     <button data-action="rest-stop" aria-label="Stop rest timer">✕</button>
+  </div>
+  <div id="amrappill" hidden>
+    <button class="rbtn" data-action="amrap-round">+ Round</button>
+    <span class="rds num" id="amrapr">0</span>
+    <span class="t num" id="amrapt">10:00</span>
+    <button data-action="amrap-stop" aria-label="Stop AMRAP timer">✕</button>
   </div>
 </div>
 <div id="sheetwrap" hidden>
@@ -386,6 +402,7 @@ const SECTIONS=[
  {id:'circuit',name:'Circuit',d:'One set of everything, repeat the loop'},
  {id:'hiit',name:'HIIT',d:'Fast circuit — hard work, short rests'},
  {id:'emom',name:'EMOM',d:'Every minute on the minute'},
+ {id:'amrap',name:'AMRAP',d:'As many rounds as possible in a time cap'},
  {id:'pyramid',name:'Pyramid',d:'Climb the weight as the reps drop'},
  {id:'finisher',name:'Finisher',d:'One last burn to empty the tank'},
  {id:'stretch',name:'Stretch',d:'Cooldown and mobility'},
@@ -393,6 +410,7 @@ const SECTIONS=[
 const secName=id=>{const s=SECTIONS.find(k=>k.id===id);return s?s.name:'';};
 
 /* ============ state ============ */
+const APP_VERSION='1.9';
 const DBKEY='liftlab.v1';
 const blank=()=>({settings:{units:'lbs',rest:[30,60,90]},custom:[],workouts:[],bodyweight:[],planned:[],active:null});
 let state=blank();
@@ -650,7 +668,7 @@ function pickerListHTML(){
 function assignGroups(structId,n){
   if(structId==='superset')return Array.from({length:n},(_,i)=>String.fromCharCode(65+Math.floor(i/2))+(i%2+1));
   if(structId==='giant')return Array.from({length:n},(_,i)=>String.fromCharCode(65+Math.floor(i/3))+(i%3+1));
-  if(structId==='circuit'||structId==='hiit'||structId==='emom')return Array.from({length:n},()=> 'ROUND');
+  if(structId==='circuit'||structId==='hiit'||structId==='emom'||structId==='amrap')return Array.from({length:n},()=> 'ROUND');
   return Array.from({length:n},()=> '');
 }
 function entriesFromSections(secs){
@@ -716,6 +734,7 @@ function viewWorkout(){
     <span class="tiny muted" style="align-self:center">Rest:</span>
     ${state.settings.rest.map(sec=>`<button class="chip" data-action="rest" data-sec="${sec}">${fmtSec(sec)}</button>`).join('')}
     ${(a.entries.some(e=>e.sec==='emom')||a.struct==='emom')?`<button class="chip on" data-action="rest" data-sec="60" data-rep="1">EMOM ↻</button>`:''}
+    ${a.entries.some(e=>e.sec==='amrap')?`<button class="chip on" data-action="amrap-open">AMRAP ⏱</button>`:''}
   </div>
   ${(()=>{let last=null;return a.entries.map((en,ei)=>{
     const h=en.sec&&en.sec!==last?`<div class="eyebrow" style="margin:16px 0 8px;color:var(--brass)">${secName(en.sec)||esc(en.sec)}</div>`:'';
@@ -1062,7 +1081,8 @@ function settingsHTML(){
         <button class="btn ghost sm" data-action="export">Export backup (.json)</button>
         <label class="btn ghost sm" style="cursor:pointer">Import backup<input type="file" accept=".json,application/json" id="importfile" hidden></label>
         <button class="btn danger sm" data-action="wipe">Erase all data</button>
-      </div></div>`;
+      </div></div>
+    <p class="tiny muted" style="text-align:center;margin:16px 0 0">LiftLab · version ${APP_VERSION}</p>`;
 }
 /* ============ chart engine (single-series line) ============ */
 const CHARTS={};
@@ -1142,6 +1162,41 @@ function closeSheet(){
   setTimeout(()=>{w.hidden=true;$('#sheet').innerHTML='';},260);
 }
 
+/* ============ AMRAP time-cap timer ============ */
+function amrapStartHTML(){
+  const caps=[6,8,10,12,15,20];
+  return `<div class="grab"></div>
+    <div class="eyebrow">AMRAP</div><h2 class="display" style="margin:4px 0 6px">Set a time cap</h2>
+    <p class="tiny muted" style="margin:0 0 14px">The clock counts down. Tap <b>+ Round</b> each time you finish the circuit — your round count is saved to the workout notes when time’s up.</p>
+    <div class="pickgrid" style="grid-template-columns:repeat(3,1fr)">
+      ${caps.map(m=>`<button class="pick" style="text-align:center" data-action="amrap-go" data-min="${m}"><div class="t">${m} min</div></button>`).join('')}
+    </div>
+    <div class="card" style="margin-top:12px"><div class="eyebrow" style="margin-bottom:8px">Custom</div>
+      <div class="row"><input type="number" inputmode="numeric" min="1" max="90" step="1" id="amrap-custom" placeholder="minutes">
+      <button class="btn primary sm" style="flex:none" data-action="amrap-go">Start</button></div></div>`;
+}
+let amrapEnd=0,amrapRounds=0;
+function amrapStart(min){
+  if(!min||min<=0){toast('Enter a time cap');return;}
+  amrapEnd=Date.now()+min*60000;amrapRounds=0;
+  $('#amrapr').textContent='0';$('#amrappill').hidden=false;tickAmrap();
+}
+function tickAmrap(){
+  if(!amrapEnd)return;
+  const left=Math.ceil((amrapEnd-Date.now())/1000);
+  if(left<=0){if(navigator.vibrate)navigator.vibrate([200,100,200,100,200]);amrapFinish();return;}
+  $('#amrapt').textContent=Math.floor(left/60)+':'+String(left%60).padStart(2,'0');
+}
+function amrapFinish(){
+  const n=amrapRounds;amrapEnd=0;$('#amrappill').hidden=true;
+  if(state.active){
+    const line='AMRAP: '+n+' round'+(n===1?'':'s');
+    state.active.notes=(state.active.notes?state.active.notes.replace(/\nAMRAP: \d+ rounds?$/,'')+'\n':'')+line;
+    save();if(UI.mode==='workout')render();
+  }
+  toast('Time! '+n+' round'+(n===1?'':'s'));
+}
+
 /* ============ rest + elapsed timers ============ */
 let restEnd=0,restRepeat=false;
 function startRest(sec,rep){restEnd=Date.now()+sec*1000;restRepeat=!!rep;$('#restpill').hidden=false;tickRest();}
@@ -1154,7 +1209,7 @@ function tickRest(){
     restEnd=0;$('#restpill').hidden=true;toast('Rest over — go');return;}
   $('#restt').textContent=(restRepeat?'EMOM ':'')+Math.floor(left/60)+':'+String(left%60).padStart(2,'0');
 }
-setInterval(()=>{tickRest();
+setInterval(()=>{tickRest();tickAmrap();
   const el=$('#elapsed'); if(el&&state.active)el.textContent=elapsedStr();},500);
 
 /* ============ mutations ============ */
@@ -1263,6 +1318,12 @@ const ACT={
   rest:el=>startRest(+el.dataset.sec,el.dataset.rep),
   'rest-add':()=>{restEnd=(restEnd||Date.now())+30000;tickRest();},
   'rest-stop':()=>{restEnd=0;restRepeat=false;$('#restpill').hidden=true;},
+  'amrap-open':()=>openSheet(amrapStartHTML()),
+  'amrap-go':el=>{const m=el.dataset.min?+el.dataset.min:parseFloat(($('#amrap-custom')||{}).value);
+    if(!m||m<=0){toast('Enter a time cap');return;}
+    amrapStart(m);closeSheet();},
+  'amrap-round':()=>{amrapRounds++;$('#amrapr').textContent=amrapRounds;if(navigator.vibrate)navigator.vibrate(12);},
+  'amrap-stop':()=>amrapFinish(),
   finish:()=>finishWorkout(),
   discard:el=>{if(!armed(el))return;
     const wasEdit=state.active&&state.active.editing;
