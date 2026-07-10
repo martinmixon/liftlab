@@ -517,14 +517,10 @@ function viewHome(){
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
     Start a Workout</button>`}
   ${state.planned.length?`<div class="eyebrow" style="margin:14px 0 8px">Planned</div>
-  ${state.planned.map(p=>`<div class="card spread" style="padding:12px 14px">
+  ${state.planned.map(p=>`<button class="card tap spread" style="width:100%;text-align:left;padding:12px 14px" data-action="plan-open" data-id="${p.id}">
     <div><div style="font-weight:700">${esc(p.name)}</div>
       <div class="tiny muted num">${fmtDateY(p.date)} · ${planCount(p)} exercise${planCount(p)===1?'':'s'}</div></div>
-    <div class="row">
-      <button class="btn primary sm" data-action="plan-start" data-id="${p.id}">Start</button>
-      <button class="iconbtn" style="width:34px;height:34px" data-action="plan-del" data-id="${p.id}" aria-label="Remove plan">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
-    </div></div>`).join('')}`:''}
+    <div style="color:var(--brass);font-weight:800">View →</div></button>`).join('')}`:''}
   <div class="eyebrow" style="margin:14px 0 8px">This week</div>
   <div class="tiles">
     <div class="tile"><div class="v">${s.n}</div><div class="u">workout${s.n===1?'':'s'}</div></div>
@@ -567,7 +563,7 @@ function builderHTML(){
     return `
     <div class="grab"></div>
     <div class="row" style="margin-bottom:4px"><button class="btn ghost sm" data-action="b-back">← Back</button></div>
-    <div class="eyebrow">Step 2 of 3</div><h2 class="display" style="margin:4px 0 6px">Build your workout</h2>
+    <div class="eyebrow">${b.editPlan?'Edit plan':'Step 2 of 3'}</div><h2 class="display" style="margin:4px 0 6px">Build your workout</h2>
     <p class="tiny muted" style="margin:0 0 12px">Stack sections — a warmup, working sets, a finisher, a stretch. Each section runs its own way.</p>
     ${b.sections.map((s,si)=>`<div class="card" style="padding:12px 14px">
       <div class="spread" style="margin-bottom:4px"><div class="grp">${secName(s.kind)}</div>
@@ -581,7 +577,7 @@ function builderHTML(){
     </div>`).join('')}
     <div class="card"><div class="eyebrow" style="margin-bottom:8px">Add a section</div>
       <div class="checks">${SECTIONS.map(k=>`<button class="chip" data-action="sec-add" data-id="${k.id}" title="${k.d}">${k.name}</button>`).join('')}</div></div>
-    <button class="btn primary" data-action="b-tostep4" ${total?'':'disabled'}>Continue${total?' — '+total+' exercise'+(total===1?'':'s'):''}</button>`;
+    <button class="btn primary" data-action="${b.editPlan?'b-saveplan':'b-tostep4'}" ${total?'':'disabled'}>${b.editPlan?'Save changes':'Continue'+(total?' — '+total+' exercise'+(total===1?'':'s'):'')}</button>`;
   }
   if(b.step===4){
     const today=dkey(new Date());
@@ -936,16 +932,43 @@ function dayHTML(k){
   return `<div class="grab"></div>
     <h2 class="display" style="margin:0 0 14px">${dt.toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'})}</h2>
     ${ws.map(workoutCard).join('')}
-    ${ps.map(p=>`<div class="card spread" style="padding:12px 14px">
+    ${ps.map(p=>`<button class="card tap spread" style="width:100%;text-align:left;padding:12px 14px" data-action="plan-open" data-id="${p.id}">
       <div><div style="font-weight:700">${esc(p.name)}</div>
         <div class="tiny muted num">planned · ${planCount(p)} exercise${planCount(p)===1?'':'s'}</div></div>
-      <div class="row">
-        <button class="btn primary sm" data-action="plan-start" data-id="${p.id}">Start</button>
-        <button class="iconbtn" style="width:34px;height:34px" data-action="plan-del" data-id="${p.id}" aria-label="Remove plan">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
-      </div></div>`).join('')}
+      <div style="color:var(--brass);font-weight:800">View →</div></button>`).join('')}
     ${!ws.length&&!ps.length?'<div class="empty" style="padding:20px">Nothing on this day yet.</div>':''}
     <button class="btn ghost" style="margin-top:6px" data-action="day-log" data-date="${k}">${isPast?'Log a workout for this day':'Plan a workout for this day'}</button>`;
+}
+function plannedSecs(p){return p.sections||[{kind:p.struct||'straight',exs:p.exs||[]}];}
+function plannedDetailHTML(id){
+  const p=state.planned.find(x=>x.id===id); if(!p)return '';
+  const secs=plannedSecs(p);
+  return `<div class="grab"></div>
+    <div class="eyebrow num">Planned · ${fmtDateY(p.date)}</div>
+    <h2 class="display" style="margin:4px 0 14px">${esc(p.name)}</h2>
+    ${secs.map(s=>`<div class="card" style="padding:12px 14px;margin-bottom:8px">
+      <div class="grp" style="margin-bottom:4px">${secName(s.kind)||esc(s.kind)}</div>
+      ${s.exs.map(id=>{const e=getEx(id);return `<div class="tiny" style="padding:3px 0">${e?esc(e.name):'?'}${e&&e.t?' <span class="muted">· timed</span>':''}</div>`;}).join('')||'<div class="tiny muted">No exercises</div>'}
+    </div>`).join('')}
+    <div class="stack" style="margin-top:12px">
+      <button class="btn primary" data-action="plan-start" data-id="${p.id}">Start now</button>
+      <div class="row" style="gap:8px">
+        <button class="btn ghost" style="flex:1" data-action="plan-edit" data-id="${p.id}">Edit</button>
+        <button class="btn ghost" style="flex:1" data-action="plan-move" data-id="${p.id}">Move</button>
+      </div>
+      <button class="btn danger" data-action="plan-del" data-id="${p.id}">Delete</button>
+    </div>`;
+}
+function planMoveHTML(id){
+  const p=state.planned.find(x=>x.id===id); if(!p)return '';
+  const today=dkey(new Date());
+  return `<div class="grab"></div>
+    <div class="row" style="margin-bottom:4px"><button class="btn ghost sm" data-action="plan-open" data-id="${p.id}">← Back</button></div>
+    <h2 class="display" style="margin:4px 0 6px">Move workout</h2>
+    <p class="tiny muted" style="margin:0 0 14px">${esc(p.name)} — currently ${fmtDateY(p.date)}</p>
+    <div class="card"><div class="eyebrow" style="margin-bottom:8px">New date</div>
+      <div class="row"><input type="date" id="plan-newdate" min="${today}" value="${dkey(p.date)}">
+      <button class="btn primary sm" style="flex:none" data-action="plan-move-save" data-id="${p.id}">Move</button></div></div>`;
 }
 function workoutDetailHTML(id){
   const w=state.workouts.find(x=>x.id===id); if(!w)return '';
@@ -1163,7 +1186,31 @@ const ACT={
     const inp=$(mode==='plan'?'#b-date-plan':'#b-date-past');
     if(!inp.value){toast('Pick a date first');return;}
     buildWorkout(mode,inp.value);},
+  'plan-open':el=>openSheet(plannedDetailHTML(el.dataset.id)),
   'plan-start':el=>startPlanned(el.dataset.id),
+  'plan-edit':el=>{
+    const p=state.planned.find(x=>x.id===el.dataset.id); if(!p)return;
+    const secs=plannedSecs(p).map(s=>({kind:s.kind,exs:(s.exs||[]).slice()}));
+    UI.builder={step:2,type:p.type||'full',sections:secs,cur:null,sel:[],q:'',eq:'',addMode:false,editPlan:p.id};
+    openSheet(builderHTML());},
+  'b-saveplan':()=>{
+    const b=UI.builder,secs=b.sections.filter(s=>s.exs.length);
+    if(!secs.length){toast('Add at least one exercise');return;}
+    const p=state.planned.find(x=>x.id===b.editPlan); if(!p){closeSheet();return;}
+    const t=TYPES.find(x=>x.id===b.type)||TYPES[4];
+    const kinds=[...new Set(secs.map(s=>s.kind))];
+    p.type=b.type;
+    p.name=t.name+(kinds.length===1&&kinds[0]!=='straight'?' · '+secName(kinds[0]):'');
+    p.sections=secs.map(s=>({kind:s.kind,exs:s.exs.slice()}));
+    delete p.exs;delete p.struct;
+    save();closeSheet();render();toast('Plan updated');},
+  'plan-move':el=>openSheet(planMoveHTML(el.dataset.id)),
+  'plan-move-save':el=>{
+    const p=state.planned.find(x=>x.id===el.dataset.id); if(!p)return;
+    const v=$('#plan-newdate').value; if(!v){toast('Pick a date first');return;}
+    p.date=fromDateInput(v);
+    state.planned.sort((a,c)=>a.date<c.date?-1:1);
+    save();render();openSheet(plannedDetailHTML(p.id));toast('Moved to '+fmtDate(p.date));},
   'plan-del':el=>{state.planned=state.planned.filter(p=>p.id!==el.dataset.id);
     save();closeSheet();render();toast('Plan removed');},
   resume:()=>{UI.mode='workout';render();},
