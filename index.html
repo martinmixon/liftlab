@@ -550,6 +550,14 @@ function openBuilder(addMode){
   UI.builder={step:addMode?3:1,type:addMode?'full':null,sections:[],cur:null,sel:[],q:'',eq:'',addMode:!!addMode};
   openSheet(builderHTML());
 }
+function moveBtn(action,data,dir,atBound,label){
+  const path=dir<0?'M6 15l6-6 6 6':'M6 9l6 6 6-6';
+  const attrs=Object.entries(data).map(([k,v])=>`data-${k}="${v}"`).join(' ');
+  return `<button class="iconbtn" style="width:26px;height:26px${atBound?';opacity:.25;pointer-events:none':''}"
+    data-action="${action}" ${attrs} data-dir="${dir}" aria-label="${label}" ${atBound?'aria-disabled="true"':''}>
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"/></svg></button>`;
+}
+function arrMove(arr,i,dir){const j=i+dir;if(j<0||j>=arr.length)return;const [x]=arr.splice(i,1);arr.splice(j,0,x);}
 function builderHTML(){
   const b=UI.builder;
   if(b.step===1)return `
@@ -568,10 +576,15 @@ function builderHTML(){
     <p class="tiny muted" style="margin:0 0 12px">Stack sections — a warmup, working sets, a finisher, a stretch. Each section runs its own way.</p>
     ${b.sections.map((s,si)=>`<div class="card" style="padding:12px 14px">
       <div class="spread" style="margin-bottom:4px"><div class="grp">${secName(s.kind)}</div>
-        <button class="iconbtn" style="width:30px;height:30px" data-action="sec-del" data-si="${si}" aria-label="Remove section">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+        <div class="row" style="gap:2px">
+          ${moveBtn('sec-move',{si},-1,si===0,'Move section up')}
+          ${moveBtn('sec-move',{si},1,si===b.sections.length-1,'Move section down')}
+          <button class="iconbtn" style="width:30px;height:30px" data-action="sec-del" data-si="${si}" aria-label="Remove section">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div></div>
       ${s.exs.map((id,xi)=>{const e=getEx(id);return `<div class="row" style="padding:5px 0">
         <span style="flex:1">${e?esc(e.name):'?'}</span>
+        ${moveBtn('sec-ex-move',{si,xi},-1,xi===0,'Move exercise up')}
+        ${moveBtn('sec-ex-move',{si,xi},1,xi===s.exs.length-1,'Move exercise down')}
         <button class="iconbtn" style="width:26px;height:26px" data-action="sec-ex-del" data-si="${si}" data-xi="${xi}" aria-label="Remove exercise">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>`;}).join('')}
       <button class="btn ghost sm" style="margin-top:6px" data-action="sec-add-ex" data-si="${si}">+ Exercises</button>
@@ -1173,6 +1186,8 @@ const ACT={
   'sec-add-ex':el=>{const b=UI.builder;b.cur=+el.dataset.si;b.sel=[];b.q='';b.step=3;$('#sheet').innerHTML=builderHTML();},
   'sec-del':el=>{UI.builder.sections.splice(+el.dataset.si,1);$('#sheet').innerHTML=builderHTML();},
   'sec-ex-del':el=>{UI.builder.sections[+el.dataset.si].exs.splice(+el.dataset.xi,1);$('#sheet').innerHTML=builderHTML();},
+  'sec-move':el=>{arrMove(UI.builder.sections,+el.dataset.si,+el.dataset.dir);$('#sheet').innerHTML=builderHTML();},
+  'sec-ex-move':el=>{arrMove(UI.builder.sections[+el.dataset.si].exs,+el.dataset.xi,+el.dataset.dir);$('#sheet').innerHTML=builderHTML();},
   'b-picker-done':()=>{const b=UI.builder;b.sections[b.cur].exs.push(...b.sel);
     b.sel=[];b.step=2;$('#sheet').innerHTML=builderHTML();},
   'b-tostep4':()=>{UI.builder.step=4;$('#sheet').innerHTML=builderHTML();},
