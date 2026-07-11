@@ -434,7 +434,7 @@ const secName=id=>{const s=SECTIONS.find(k=>k.id===id);return s?s.name:'';};
 const CARDIO_FILTER=e=>e.m.includes('Conditioning')||e.p.includes('cond'); // cardio section shows conditioning exercises regardless of workout type
 
 /* ============ state ============ */
-const APP_VERSION='1.11';
+const APP_VERSION='1.12';
 const DBKEY='liftlab.v1';
 const blank=()=>({settings:{units:'lbs',rest:[30,60,90]},custom:[],workouts:[],bodyweight:[],planned:[],active:null});
 let state=blank();
@@ -459,6 +459,8 @@ const fmtW=lbs=>fmtN(dispW(lbs))+' '+unit();
 const roundInc=v=>{const s=state.settings.units==='kg'?1.25:2.5;return Math.round(v/s)*s;};
 const allEx=()=>LIB.concat(state.custom);
 const getEx=id=>allEx().find(e=>e.id===id);
+const grpIdx=e=>{const i=GROUPS.indexOf(e.m[0]);return i<0?99:i;}; // primary muscle group order
+const byGroupName=(a,b)=>grpIdx(a)-grpIdx(b)||a.name.localeCompare(b.name); // custom + built-in sort identically
 const fmtDate=iso=>new Date(iso).toLocaleDateString(undefined,{month:'short',day:'numeric'});
 const fmtDateY=iso=>new Date(iso).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'});
 const dkey=d=>{const x=new Date(d);return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');};
@@ -699,7 +701,8 @@ function pickerListHTML(){
     .filter(e=>!q||(e.name+' '+e.m.join(' ')).toLowerCase().includes(q))
     .filter(e=>!b.eq||e.eq===b.eq)
     .filter(e=>!state.settings.hideMachines||e.eq!=='Machine')
-    .filter(e=>!taken.includes(e.id));
+    .filter(e=>!taken.includes(e.id))
+    .sort(byGroupName);
   if(!list.length)return `<div class="empty">No matches — try a different search or gear filter.</div>`;
   return list.map(e=>{
     const on=b.sel.includes(e.id);
@@ -932,7 +935,8 @@ function exListHTML(){
   const q=UI.exq.trim().toLowerCase();
   const list=allEx().filter(e=>(!q||(e.name+' '+e.m.join(' ')).toLowerCase().includes(q))
     &&(!UI.exg||e.m.includes(UI.exg))
-    &&(!state.settings.hideMachines||e.eq!=='Machine'));
+    &&(!state.settings.hideMachines||e.eq!=='Machine'))
+    .sort(byGroupName);
   if(!list.length)return `<div class="empty">No exercises match. Add your own with the + button.</div>`;
   return list.map(e=>{
     const last=lastStr(e);
