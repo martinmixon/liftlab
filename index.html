@@ -403,14 +403,16 @@ const SECTIONS=[
  {id:'hiit',name:'HIIT',d:'Fast circuit — hard work, short rests'},
  {id:'emom',name:'EMOM',d:'Every minute on the minute'},
  {id:'amrap',name:'AMRAP',d:'As many rounds as possible in a time cap'},
+ {id:'cardio',name:'Cardio',d:'Conditioning — bike, run, rower, intervals'},
  {id:'pyramid',name:'Pyramid',d:'Climb the weight as the reps drop'},
  {id:'finisher',name:'Finisher',d:'One last burn to empty the tank'},
  {id:'stretch',name:'Stretch',d:'Cooldown and mobility'},
 ];
 const secName=id=>{const s=SECTIONS.find(k=>k.id===id);return s?s.name:'';};
+const CARDIO_FILTER=e=>e.m.includes('Conditioning')||e.p.includes('cond'); // cardio section shows conditioning exercises regardless of workout type
 
 /* ============ state ============ */
-const APP_VERSION='1.9';
+const APP_VERSION='1.10';
 const DBKEY='liftlab.v1';
 const blank=()=>({settings:{units:'lbs',rest:[30,60,90]},custom:[],workouts:[],bodyweight:[],planned:[],active:null});
 let state=blank();
@@ -635,7 +637,7 @@ function builderHTML(){
     ${b.addMode?'':`<div class="row" style="margin-bottom:4px"><button class="btn ghost sm" data-action="b-back">← Back</button></div>`}
     <div class="eyebrow">${b.addMode?'Add exercise':secName(sec.kind)+' section'}</div>
     <h2 class="display" style="margin:4px 0 12px">${b.addMode?'Pick exercises to add':'Choose exercises'}</h2>
-    <input type="search" placeholder="Search ${t.name.toLowerCase()} exercises…" value="${esc(b.q)}" data-field="b-q" style="margin-bottom:10px">
+    <input type="search" placeholder="Search ${(sec&&sec.kind==='cardio')?'cardio':t.name.toLowerCase()} exercises…" value="${esc(b.q)}" data-field="b-q" style="margin-bottom:10px">
     <div class="chips scroll" style="margin-bottom:12px">
       <button class="chip ${b.eq===''?'on':''}" data-action="b-eq" data-id="">All gear</button>
       ${EQUIPS.filter(q=>!(state.settings.hideMachines&&q==='Machine')).map(q=>`<button class="chip ${b.eq===q?'on':''}" data-action="b-eq" data-id="${q}">${q}</button>`).join('')}
@@ -649,9 +651,11 @@ function builderHTML(){
 function pickerListHTML(){
   const b=UI.builder,t=TYPES.find(x=>x.id===b.type);
   const q=b.q.trim().toLowerCase();
+  const sec=b.addMode?null:(b.cur!=null?b.sections[b.cur]:null);
   const taken=b.addMode&&state.active?state.active.entries.map(e=>e.ex)
-    :(b.cur!=null&&b.sections[b.cur]?b.sections[b.cur].exs:[]);
-  let list=allEx().filter(t.f)
+    :(sec?sec.exs:[]);
+  const exFilter=(sec&&sec.kind==='cardio')?CARDIO_FILTER:t.f;
+  let list=allEx().filter(exFilter)
     .filter(e=>!q||(e.name+' '+e.m.join(' ')).toLowerCase().includes(q))
     .filter(e=>!b.eq||e.eq===b.eq)
     .filter(e=>!state.settings.hideMachines||e.eq!=='Machine')
