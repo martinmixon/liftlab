@@ -434,7 +434,7 @@ const secName=id=>{const s=SECTIONS.find(k=>k.id===id);return s?s.name:'';};
 const CARDIO_FILTER=e=>e.m.includes('Conditioning')||e.p.includes('cond'); // cardio section shows conditioning exercises regardless of workout type
 
 /* ============ state ============ */
-const APP_VERSION='1.12';
+const APP_VERSION='1.13';
 const DBKEY='liftlab.v1';
 const blank=()=>({settings:{units:'lbs',rest:[30,60,90]},custom:[],workouts:[],bodyweight:[],planned:[],active:null});
 let state=blank();
@@ -696,7 +696,8 @@ function pickerListHTML(){
   const sec=b.addMode?null:(b.cur!=null?b.sections[b.cur]:null);
   const taken=b.addMode&&state.active?state.active.entries.map(e=>e.ex)
     :(sec?sec.exs:[]);
-  const exFilter=(sec&&sec.kind==='cardio')?CARDIO_FILTER:t.f;
+  // cardio section shows only conditioning; every other section shows its type PLUS conditioning
+  const exFilter=(sec&&sec.kind==='cardio')?CARDIO_FILTER:(e=>t.f(e)||CARDIO_FILTER(e));
   let list=allEx().filter(exFilter)
     .filter(e=>!q||(e.name+' '+e.m.join(' ')).toLowerCase().includes(q))
     .filter(e=>!b.eq||e.eq===b.eq)
