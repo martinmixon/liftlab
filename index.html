@@ -434,7 +434,7 @@ const secName=id=>{const s=SECTIONS.find(k=>k.id===id);return s?s.name:'';};
 const CARDIO_FILTER=e=>e.m.includes('Conditioning')||e.p.includes('cond'); // cardio section shows conditioning exercises regardless of workout type
 
 /* ============ state ============ */
-const APP_VERSION='1.14';
+const APP_VERSION='1.15';
 const DBKEY='liftlab.v1';
 const blank=()=>({settings:{units:'lbs',rest:[30,60,90]},custom:[],workouts:[],bodyweight:[],planned:[],templates:[],active:null});
 let state=blank();
@@ -1227,6 +1227,98 @@ function viewBody(){
 }
 
 /* ============ settings sheet ============ */
+/* ============ coaching export (readable report for Claude) ============ */
+function coachReport(days){
+  const cutoff=days?Date.now()-days*864e5:0;
+  const ws=state.workouts.filter(w=>new Date(w.date).getTime()>=cutoff)
+    .sort((a,b)=>a.date<b.date?-1:1);
+  const bw=state.bodyweight.filter(x=>new Date(x.date).getTime()>=cutoff)
+    .sort((a,b)=>a.date<b.date?-1:1);
+  const L=[];
+  L.push('# LiftLab training log');
+  L.push('');
+  L.push('Exported '+fmtDateY(new Date().toISOString())+' · weights in '+unit()+' · distances in '+distUnit());
+  L.push('Range: '+(days?'last '+days+' days':'all time')+' · '+ws.length+' workout'+(ws.length===1?'':'s'));
+  L.push('');
+  if(bw.length){
+    L.push('## Body weight');
+    const cur=bw[bw.length-1],first=bw[0];
+    L.push('Latest: '+fmtW(cur.w)+' ('+fmtDateY(cur.date)+')');
+    if(bw.length>1)L.push('Change over range: '+(cur.w>first.w?'+':'')+fmtN(dispW(cur.w-first.w))+' '+unit()+' from '+fmtW(first.w));
+    L.push('');
+    L.push(bw.map(x=>dkey(x.date)+': '+fmtW(x.w)).join('  \n'));
+    L.push('');
+  }
+  if(!ws.length){L.push('## Workouts');L.push('No workouts logged in this range.');return L.join('\n');}
+  // per-exercise progression within range
+  const prog={};
+  for(const w of ws)for(const en of w.entries){
+    const ex=getEx(en.ex);const s=doneSets(en);if(!ex||!s.length)continue;
+    const key=ex.name;
+    const val=ex.dist?Math.max(...s.map(x=>x.d||0)):ex.t?Math.max(...s.map(x=>x.r||0)):Math.max(...s.map(x=>x.w||0));
+    const fmt=ex.dist?fmtDist:ex.t?fmtSec:fmtW;
+    (prog[key]=prog[key]||{n:0,first:null,last:null,fmt}).n++;
+    if(prog[key].first===null)prog[key].first=val;
+    prog[key].last=val;
+  }
+  L.push('## Workouts');
+  L.push('');
+  for(const w of ws){
+    const nSets=w.entries.reduce((a,en)=>a+doneSets(en).length,0);
+    L.push('### '+dkey(w.date)+' — '+w.name);
+    const meta=[];
+    if(w.dur)meta.push(w.dur+' min');
+    meta.push(nSets+' set'+(nSets===1?'':'s'));
+    if(w.vol)meta.push(fmtVol(w.vol)+' '+unit()+' volume');
+    L.push(meta.join(' · '));
+    if(w.prs&&w.prs.length)L.push('PRs: '+w.prs.join(', '));
+    let lastSec=null;
+    for(const en of w.entries){
+      const ex=getEx(en.ex);const s=doneSets(en);if(!ex||!s.length)continue;
+      if(en.sec&&en.sec!==lastSec){L.push('');L.push('**'+(secName(en.sec)||en.sec)+'**');lastSec=en.sec;}
+      const tag=en.group&&en.group!=='ROUND'?en.group+' ':'';
+      L.push('- '+tag+ex.name+': '+s.map(x=>setStr(ex,x)).join(', '));
+    }
+    if(w.notes){L.push('');L.push('Notes: '+w.notes.replace(/\n/g,' / '));}
+    L.push('');
+  }
+  const keys=Object.keys(prog).sort();
+  if(keys.length){
+    L.push('## Progress in range (best set per exercise)');
+    L.push('');
+    for(const k of keys){const p=prog[k];
+      const same=p.first===p.last;
+      L.push('- '+k+': '+(same?p.fmt(p.last):p.fmt(p.first)+' → '+p.fmt(p.last))+' ('+p.n+' session'+(p.n===1?'':'s')+')');
+    }
+    L.push('');
+  }
+  if(state.planned.length){
+    L.push('## Scheduled ahead');
+    for(const p of state.planned)L.push('- '+dkey(p.date)+': '+p.name+' ('+planCount(p)+' exercises)');
+    L.push('');
+  }
+  return L.join('\n');
+}
+function coachSheetHTML(){
+  const days=UI.expDays===undefined?28:UI.expDays;
+  const txt=coachReport(days);
+  const opts=[[7,'7 days'],[28,'4 weeks'],[84,'12 weeks'],[0,'All time']];
+  return `<div class="grab"></div>
+    <div class="eyebrow">Share with Claude</div>
+    <h2 class="display" style="margin:4px 0 6px">Export your training log</h2>
+    <p class="tiny muted" style="margin:0 0 12px">A readable summary of your workouts, body weight, and progress — paste or share it into Claude for feedback.</p>
+    <div class="chips" style="margin-bottom:12px">
+      ${opts.map(([d,label])=>`<button class="chip ${days===d?'on':''}" data-action="exp-range" data-d="${d}">${label}</button>`).join('')}
+    </div>
+    <div class="card" style="padding:12px 14px;max-height:220px;overflow:auto">
+      <pre id="exp-text" style="margin:0;white-space:pre-wrap;font-size:11.5px;line-height:1.5;color:var(--ink2);font-family:ui-monospace,SFMono-Regular,Menlo,monospace">${esc(txt)}</pre>
+    </div>
+    <div class="stack" style="margin-top:12px">
+      <button class="btn primary" data-action="exp-copy">Copy to clipboard</button>
+      ${navigator.share?`<button class="btn ghost" data-action="exp-share">Share…</button>`:''}
+      <button class="btn ghost" data-action="exp-file">Download as .md</button>
+    </div>`;
+}
 function settingsHTML(){
   const u=state.settings.units,h=!!state.settings.hideMachines;
   return `<div class="grab"></div>
@@ -1248,6 +1340,7 @@ function settingsHTML(){
     <div class="card"><div class="eyebrow" style="margin-bottom:8px">Your data</div>
       <p class="tiny muted" style="margin:0 0 10px">${state.workouts.length} workouts · ${state.templates.length} saved workouts · ${state.bodyweight.length} body-weight entries · ${state.custom.length} custom exercises. Data lives in this browser — export a backup to move devices.</p>
       <div class="stack">
+        <button class="btn ghost sm" data-action="coach-export">Share training log with Claude</button>
         <button class="btn ghost sm" data-action="export">Export backup (.json)</button>
         <label class="btn ghost sm" style="cursor:pointer">Import backup<input type="file" accept=".json,application/json" id="importfile" hidden></label>
         <button class="btn danger sm" data-action="wipe">Erase all data</button>
@@ -1614,6 +1707,28 @@ const ACT={
     a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000);},
   wipe:el=>{if(!armed(el))return;
     state=blank();save();closeSheet();render();toast('All data erased');},
+  'coach-export':()=>{UI.expDays=28;openSheet(coachSheetHTML());},
+  'exp-range':el=>{UI.expDays=+el.dataset.d;$('#sheet').innerHTML=coachSheetHTML();},
+  'exp-copy':async()=>{
+    const txt=coachReport(UI.expDays===undefined?28:UI.expDays);
+    try{await navigator.clipboard.writeText(txt);toast('Copied — paste it into Claude');}
+    catch(_){ // fallback for browsers without clipboard permission
+      const ta=document.createElement('textarea');ta.value=txt;ta.style.position='fixed';ta.style.opacity='0';
+      document.body.appendChild(ta);ta.select();
+      try{document.execCommand('copy');toast('Copied — paste it into Claude');}
+      catch(e){toast('Could not copy — use Download instead');}
+      ta.remove();
+    }},
+  'exp-share':async()=>{
+    const txt=coachReport(UI.expDays===undefined?28:UI.expDays);
+    try{await navigator.share({title:'LiftLab training log',text:txt});}
+    catch(_){/* user dismissed the share sheet */}},
+  'exp-file':()=>{
+    const txt=coachReport(UI.expDays===undefined?28:UI.expDays);
+    const blob=new Blob([txt],{type:'text/markdown'});
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+    a.download='liftlab-log-'+new Date().toISOString().slice(0,10)+'.md';
+    a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000);},
 };
 function importFile(e){
   const f=e.target.files[0]; if(!f)return;
