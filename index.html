@@ -434,13 +434,14 @@ const secName=id=>{const s=SECTIONS.find(k=>k.id===id);return s?s.name:'';};
 const CARDIO_FILTER=e=>e.m.includes('Conditioning')||e.p.includes('cond'); // cardio section shows conditioning exercises regardless of workout type
 
 /* ============ state ============ */
-const APP_VERSION='1.13';
+const APP_VERSION='1.14';
 const DBKEY='liftlab.v1';
-const blank=()=>({settings:{units:'lbs',rest:[30,60,90]},custom:[],workouts:[],bodyweight:[],planned:[],active:null});
+const blank=()=>({settings:{units:'lbs',rest:[30,60,90]},custom:[],workouts:[],bodyweight:[],planned:[],templates:[],active:null});
 let state=blank();
 try{const raw=localStorage.getItem(DBKEY); if(raw){state=Object.assign(blank(),JSON.parse(raw));}}catch(e){}
 state.custom.forEach(e=>{e.m=[].concat(e.m||e.g||'Other');}); // migrate single-group customs
 if(!Array.isArray(state.settings.rest)||state.settings.rest.length!==3)state.settings.rest=[30,60,90]; // migrate rest defaults
+if(!Array.isArray(state.templates))state.templates=[]; // migrate saved workouts
 const save=()=>{try{localStorage.setItem(DBKEY,JSON.stringify(state));}catch(e){toast('Could not save — storage unavailable');}};
 
 const UI={tab:'home',mode:state.active?'workout':null,exq:'',exg:'',metric:'top',
@@ -584,6 +585,11 @@ function viewHome(){
     <div><div style="font-weight:700">${esc(p.name)}</div>
       <div class="tiny muted num">${fmtDateY(p.date)} · ${planCount(p)} exercise${planCount(p)===1?'':'s'}</div></div>
     <div style="color:var(--brass);font-weight:800">View →</div></button>`).join('')}`:''}
+  ${state.templates.length?`<div class="eyebrow" style="margin:14px 0 8px">Saved workouts</div>
+  ${state.templates.map(t=>`<button class="card tap spread" style="width:100%;text-align:left;padding:12px 14px" data-action="tpl-open" data-id="${t.id}">
+    <div><div style="font-weight:700">${esc(t.name)}</div>
+      <div class="tiny muted num">${planCount(t)} exercise${planCount(t)===1?'':'s'}</div></div>
+    <div style="color:var(--brass);font-weight:800">View →</div></button>`).join('')}`:''}
   <div class="eyebrow" style="margin:14px 0 8px">This week</div>
   <div class="tiles">
     <div class="tile"><div class="v">${s.n}</div><div class="u">workout${s.n===1?'':'s'}</div></div>
@@ -634,7 +640,7 @@ function builderHTML(){
     return `
     <div class="grab"></div>
     <div class="row" style="margin-bottom:4px"><button class="btn ghost sm" data-action="b-back">← Back</button></div>
-    <div class="eyebrow">${b.editPlan?'Edit plan':'Step 2 of 3'}</div><h2 class="display" style="margin:4px 0 6px">Build your workout</h2>
+    <div class="eyebrow">${b.editTpl?'Edit saved workout':b.editPlan?'Edit plan':'Step 2 of 3'}</div><h2 class="display" style="margin:4px 0 6px">Build your workout</h2>
     <p class="tiny muted" style="margin:0 0 12px">Stack sections — a warmup, working sets, a finisher, a stretch. Each section runs its own way.</p>
     ${b.sections.map((s,si)=>`<div class="card" style="padding:12px 14px">
       <div class="spread" style="margin-bottom:4px"><div class="grp">${secName(s.kind)}</div>
@@ -653,7 +659,7 @@ function builderHTML(){
     </div>`).join('')}
     <div class="card"><div class="eyebrow" style="margin-bottom:8px">Add a section</div>
       <div class="checks">${SECTIONS.map(k=>`<button class="chip" data-action="sec-add" data-id="${k.id}" title="${k.d}">${k.name}</button>`).join('')}</div></div>
-    <button class="btn primary" data-action="${b.editPlan?'b-saveplan':'b-tostep4'}" ${total?'':'disabled'}>${b.editPlan?'Save changes':'Continue'+(total?' — '+total+' exercise'+(total===1?'':'s'):'')}</button>`;
+    <button class="btn primary" data-action="${b.editTpl?'b-savetpl-edit':b.editPlan?'b-saveplan':'b-tostep4'}" ${total?'':'disabled'}>${(b.editTpl||b.editPlan)?'Save changes':'Continue'+(total?' — '+total+' exercise'+(total===1?'':'s'):'')}</button>`;
   }
   if(b.step===4){
     const today=dkey(new Date());
@@ -669,7 +675,11 @@ function builderHTML(){
     <div class="card"><div class="eyebrow" style="margin-bottom:8px">Log a past workout</div>
       <div class="row"><input type="date" id="b-date-past" max="${today}" value="${b.presetDate&&b.presetDate<=today?b.presetDate:''}">
       <button class="btn ghost sm" style="flex:none" data-action="b-when" data-id="past">Log it</button></div>
-      <div class="tiny muted" style="margin-top:8px">You’ll enter the sets you did, then save it to that date.</div></div>`;
+      <div class="tiny muted" style="margin-top:8px">You’ll enter the sets you did, then save it to that date.</div></div>
+    <div class="card"><div class="eyebrow" style="margin-bottom:8px">Save for later</div>
+      <div class="row"><input id="tpl-savename" placeholder="Name (optional)">
+      <button class="btn ghost sm" style="flex:none" data-action="b-savetpl">Save</button></div>
+      <div class="tiny muted" style="margin-top:8px">Keeps it in Saved workouts so you can start or schedule it anytime.</div></div>`;
   }
   // step 3: exercise picker (for a section, or adding to a live workout)
   const t=TYPES.find(x=>x.id===b.type);
@@ -1069,7 +1079,12 @@ function dayHTML(k){
         <div class="tiny muted num">planned · ${planCount(p)} exercise${planCount(p)===1?'':'s'}</div></div>
       <div style="color:var(--brass);font-weight:800">View →</div></button>`).join('')}
     ${!ws.length&&!ps.length?'<div class="empty" style="padding:20px">Nothing on this day yet.</div>':''}
-    <button class="btn ghost" style="margin-top:6px" data-action="day-log" data-date="${k}">${isPast?'Log a workout for this day':'Plan a workout for this day'}</button>`;
+    <button class="btn ghost" style="margin-top:6px" data-action="day-log" data-date="${k}">${isPast?'Log a workout for this day':'Plan a workout for this day'}</button>
+    ${(!isPast&&state.templates.length)?`<div class="eyebrow" style="margin:16px 0 8px">Or use a saved workout</div>
+      ${state.templates.map(t=>`<button class="card tap spread" style="width:100%;text-align:left;padding:12px 14px" data-action="tpl-sched-day" data-id="${t.id}" data-date="${k}">
+        <div><div style="font-weight:700">${esc(t.name)}</div>
+          <div class="tiny muted num">${planCount(t)} exercise${planCount(t)===1?'':'s'}</div></div>
+        <div style="color:var(--brass);font-weight:800">Schedule →</div></button>`).join('')}`:''}`;
 }
 function plannedSecs(p){return p.sections||[{kind:p.struct||'straight',exs:p.exs||[]}];}
 function plannedDetailHTML(id){
@@ -1102,6 +1117,61 @@ function planMoveHTML(id){
       <div class="row"><input type="date" id="plan-newdate" min="${today}" value="${dkey(p.date)}">
       <button class="btn primary sm" style="flex:none" data-action="plan-move-save" data-id="${p.id}">Move</button></div></div>`;
 }
+/* ============ saved workouts (templates) ============ */
+function templateDetailHTML(id){
+  const t=state.templates.find(x=>x.id===id); if(!t)return '';
+  const secs=t.sections||[];
+  return `<div class="grab"></div>
+    <div class="eyebrow">Saved workout</div>
+    <h2 class="display" style="margin:4px 0 14px">${esc(t.name)}</h2>
+    ${secs.map(s=>`<div class="card" style="padding:12px 14px;margin-bottom:8px">
+      <div class="grp" style="margin-bottom:4px">${secName(s.kind)||esc(s.kind)}</div>
+      ${s.exs.map(id=>{const e=getEx(id);return `<div class="tiny" style="padding:3px 0">${e?esc(e.name):'?'}</div>`;}).join('')||'<div class="tiny muted">No exercises</div>'}
+    </div>`).join('')}
+    <div class="stack" style="margin-top:12px">
+      <button class="btn primary" data-action="tpl-start" data-id="${t.id}">Start now</button>
+      <div class="row" style="gap:8px">
+        <button class="btn ghost" style="flex:1" data-action="tpl-sched" data-id="${t.id}">Schedule</button>
+        <button class="btn ghost" style="flex:1" data-action="tpl-edit" data-id="${t.id}">Edit</button>
+      </div>
+      <button class="btn danger" data-action="tpl-del" data-id="${t.id}">Delete</button>
+    </div>`;
+}
+function tplScheduleHTML(id){
+  const t=state.templates.find(x=>x.id===id); if(!t)return '';
+  const today=dkey(new Date());
+  return `<div class="grab"></div>
+    <div class="row" style="margin-bottom:4px"><button class="btn ghost sm" data-action="tpl-open" data-id="${t.id}">← Back</button></div>
+    <h2 class="display" style="margin:4px 0 6px">Schedule workout</h2>
+    <p class="tiny muted" style="margin:0 0 14px">${esc(t.name)}</p>
+    <div class="card"><div class="eyebrow" style="margin-bottom:8px">Pick a day</div>
+      <div class="row"><input type="date" id="tpl-date" min="${today}" value="">
+      <button class="btn primary sm" style="flex:none" data-action="tpl-sched-save" data-id="${t.id}">Schedule</button></div></div>`;
+}
+function startTemplate(id){
+  const t=state.templates.find(x=>x.id===id); if(!t)return;
+  state.active={id:'w'+Date.now(),date:new Date().toISOString(),startedAt:Date.now(),
+    name:t.name,type:t.type,entries:entriesFromSections(t.sections)};
+  save();closeSheet();UI.mode='workout';render();
+}
+function saveTemplateFromBuilder(){
+  const b=UI.builder,secs=b.sections.filter(s=>s.exs.length);
+  if(!secs.length){toast('Add at least one exercise');return;}
+  const t=TYPES.find(x=>x.id===b.type)||TYPES[4];
+  const kinds=[...new Set(secs.map(s=>s.kind))];
+  const auto=t.name+(kinds.length===1&&kinds[0]!=='straight'?' · '+secName(kinds[0]):'');
+  const name=(($('#tpl-savename')||{}).value||'').trim()||auto;
+  state.templates.push({id:'t'+Date.now(),name,type:b.type,sections:secs.map(s=>({kind:s.kind,exs:s.exs.slice()}))});
+  save();closeSheet();UI.tab='home';UI.mode=null;render();toast('Saved to your workouts');
+}
+function sectionsFromWorkout(w){
+  const secs=[];let cur=null;
+  for(const en of w.entries){ if(!getEx(en.ex))continue;
+    const kind=en.sec||w.struct||'straight';
+    if(!cur||cur.kind!==kind){cur={kind,exs:[]};secs.push(cur);}
+    cur.exs.push(en.ex);}
+  return secs;
+}
 function workoutDetailHTML(id){
   const w=state.workouts.find(x=>x.id===id); if(!w)return '';
   return `<div class="grab"></div>
@@ -1117,13 +1187,12 @@ function workoutDetailHTML(id){
       </div>`;}).join('');})()}
     ${w.notes?`<div class="card" style="padding:12px 14px"><div class="eyebrow" style="margin-bottom:4px">Notes</div>
       <p class="tiny" style="margin:0;white-space:pre-wrap">${esc(w.notes)}</p></div>`:''}
-    <div class="spread" style="margin-top:10px">
-      <div class="tiny muted num">Total volume: ${fmtVol(w.vol||0)} ${unit()}</div>
-      <div class="row">
-        <button class="btn ghost sm" data-action="w-copy" data-id="${w.id}">Copy</button>
-        <button class="btn ghost sm" data-action="w-edit" data-id="${w.id}">Edit</button>
-        <button class="btn danger sm" data-action="del-workout" data-id="${w.id}">Delete</button>
-      </div>
+    <div class="tiny muted num" style="margin-top:10px">Total volume: ${fmtVol(w.vol||0)} ${unit()}</div>
+    <button class="btn ghost sm" style="width:100%;margin-top:10px" data-action="w-savetpl" data-id="${w.id}">Save as a workout I can reuse</button>
+    <div class="row" style="gap:8px;margin-top:8px">
+      <button class="btn ghost sm" style="flex:1" data-action="w-copy" data-id="${w.id}">Copy</button>
+      <button class="btn ghost sm" style="flex:1" data-action="w-edit" data-id="${w.id}">Edit</button>
+      <button class="btn danger sm" style="flex:1" data-action="del-workout" data-id="${w.id}">Delete</button>
     </div>`;
 }
 
@@ -1177,7 +1246,7 @@ function settingsHTML(){
       </div>
       <p class="tiny muted" style="margin:8px 0 0">The three rest-timer buttons shown during a workout, in seconds.</p></div>
     <div class="card"><div class="eyebrow" style="margin-bottom:8px">Your data</div>
-      <p class="tiny muted" style="margin:0 0 10px">${state.workouts.length} workouts · ${state.bodyweight.length} body-weight entries · ${state.custom.length} custom exercises. Data lives in this browser — export a backup to move devices.</p>
+      <p class="tiny muted" style="margin:0 0 10px">${state.workouts.length} workouts · ${state.templates.length} saved workouts · ${state.bodyweight.length} body-weight entries · ${state.custom.length} custom exercises. Data lives in this browser — export a backup to move devices.</p>
       <div class="stack">
         <button class="btn ghost sm" data-action="export">Export backup (.json)</button>
         <label class="btn ghost sm" style="cursor:pointer">Import backup<input type="file" accept=".json,application/json" id="importfile" hidden></label>
@@ -1478,14 +1547,51 @@ const ACT={
     save();closeSheet();UI.mode='workout';render();},
   'w-copy':el=>{
     const w=state.workouts.find(x=>x.id===el.dataset.id); if(!w)return;
-    const secs=[];let cur=null;
-    for(const en of w.entries){ if(!getEx(en.ex))continue;
-      const kind=en.sec||w.struct||'straight';
-      if(!cur||cur.kind!==kind){cur={kind,exs:[]};secs.push(cur);}
-      cur.exs.push(en.ex);}
+    const secs=sectionsFromWorkout(w);
     if(!secs.length){toast('Those exercises no longer exist');return;}
     UI.builder={step:4,type:w.type||'full',sections:secs,cur:null,sel:[],q:'',eq:'',addMode:false,presetDate:''};
     openSheet(builderHTML());},
+  'w-savetpl':el=>{
+    const w=state.workouts.find(x=>x.id===el.dataset.id); if(!w)return;
+    const secs=sectionsFromWorkout(w);
+    if(!secs.length){toast('Those exercises no longer exist');return;}
+    state.templates.push({id:'t'+Date.now(),name:w.name,type:w.type||'full',sections:secs});
+    save();closeSheet();UI.tab='home';UI.mode=null;render();toast('Saved to your workouts');},
+  'tpl-open':el=>openSheet(templateDetailHTML(el.dataset.id)),
+  'tpl-start':el=>{
+    if(state.active){toast('Finish or discard your current workout first');return;}
+    startTemplate(el.dataset.id);},
+  'tpl-sched':el=>openSheet(tplScheduleHTML(el.dataset.id)),
+  'tpl-sched-day':el=>{
+    const t=state.templates.find(x=>x.id===el.dataset.id); if(!t)return;
+    const iso=fromDateInput(el.dataset.date);
+    state.planned.push({id:'p'+Date.now(),date:iso,name:t.name,type:t.type,
+      sections:t.sections.map(s=>({kind:s.kind,exs:s.exs.slice()}))});
+    state.planned.sort((a,c)=>a.date<c.date?-1:1);
+    save();closeSheet();render();toast('Scheduled for '+fmtDate(iso));},
+  'tpl-sched-save':el=>{
+    const t=state.templates.find(x=>x.id===el.dataset.id); if(!t)return;
+    const v=$('#tpl-date').value; if(!v){toast('Pick a date first');return;}
+    state.planned.push({id:'p'+Date.now(),date:fromDateInput(v),name:t.name,type:t.type,
+      sections:t.sections.map(s=>({kind:s.kind,exs:s.exs.slice()}))});
+    state.planned.sort((a,c)=>a.date<c.date?-1:1);
+    save();closeSheet();UI.tab='home';UI.mode=null;render();
+    toast('Scheduled for '+fmtDate(fromDateInput(v)));},
+  'tpl-edit':el=>{
+    const t=state.templates.find(x=>x.id===el.dataset.id); if(!t)return;
+    UI.builder={step:2,type:t.type||'full',sections:t.sections.map(s=>({kind:s.kind,exs:s.exs.slice()})),
+      cur:null,sel:[],q:'',eq:'',addMode:false,editTpl:t.id};
+    openSheet(builderHTML());},
+  'b-savetpl-edit':()=>{
+    const b=UI.builder,secs=b.sections.filter(s=>s.exs.length);
+    if(!secs.length){toast('Add at least one exercise');return;}
+    const t=state.templates.find(x=>x.id===b.editTpl); if(!t){closeSheet();return;}
+    t.type=b.type;t.sections=secs.map(s=>({kind:s.kind,exs:s.exs.slice()}));
+    save();closeSheet();render();toast('Saved workout updated');},
+  'b-savetpl':()=>saveTemplateFromBuilder(),
+  'tpl-del':el=>{if(!armed(el))return;
+    state.templates=state.templates.filter(t=>t.id!==el.dataset.id);
+    save();closeSheet();render();toast('Saved workout removed');},
   'cal-prev':()=>{UI.cal.m--;if(UI.cal.m<0){UI.cal.m=11;UI.cal.y--;}render();},
   'cal-next':()=>{UI.cal.m++;if(UI.cal.m>11){UI.cal.m=0;UI.cal.y++;}render();},
   'cal-day':el=>openSheet(dayHTML(el.dataset.date)),
