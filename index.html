@@ -136,6 +136,13 @@
   .dfld{display:flex;align-items:center;gap:4px;}
   .dfld input{text-align:center;padding:10px 2px;min-width:0;width:100%;font-weight:700;font-size:16px;}
   .dfld .u{font-size:12px;color:var(--ink2);flex:none;}
+  /* builder target (sets × reps/time) */
+  .tgrow{display:flex;align-items:center;gap:4px;padding:2px 0 4px;}
+  .tglbl{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink3);}
+  .tstep{width:26px;height:28px;flex:none;border-radius:8px;background:var(--raised);border:1px solid var(--line);
+    color:var(--ink2);font-size:15px;font-weight:700;line-height:1;}
+  .tstep:active{background:var(--grid);}
+  .tval{min-width:34px;text-align:center;font-weight:800;font-size:14px;}
   .step{width:30px;height:42px;flex:none;border-radius:9px;background:var(--raised);border:1px solid var(--line);
     color:var(--ink2);font-size:18px;font-weight:700;line-height:1;}
   .step:active{background:var(--grid);}
@@ -434,7 +441,7 @@ const secName=id=>{const s=SECTIONS.find(k=>k.id===id);return s?s.name:'';};
 const CARDIO_FILTER=e=>e.m.includes('Conditioning')||e.p.includes('cond'); // cardio section shows conditioning exercises regardless of workout type
 
 /* ============ state ============ */
-const APP_VERSION='1.15';
+const APP_VERSION='1.16';
 const DBKEY='liftlab.v1';
 const blank=()=>({settings:{units:'lbs',rest:[30,60,90]},custom:[],workouts:[],bodyweight:[],planned:[],templates:[],active:null});
 let state=blank();
@@ -480,6 +487,21 @@ function setStr(ex,s){
   return (s.w>0?fmtN(dispW(s.w)):'bw')+'×'+s.r;
 }
 const planCount=p=>p.sections?p.sections.reduce((a,s)=>a+s.exs.length,0):(p.exs||[]).length;
+/* a section exercise is either a plain id (legacy) or {id,sets,r} with target sets/reps-or-time */
+const exIdOf=x=>typeof x==='string'?x:x.id;
+const exTgOf=x=>typeof x==='string'?null:x;
+const cloneSecs=secs=>(secs||[]).map(s=>({kind:s.kind,
+  exs:(s.exs||[]).map(x=>typeof x==='string'?x:Object.assign({},x))}));
+function effTarget(x){ // target if set, else what the logger would default to
+  const id=exIdOf(x),tg=exTgOf(x),ex=getEx(id),lp=ex?lastPerf(id):null;
+  const sets=tg&&tg.sets?tg.sets:(lp?Math.min(Math.max(lp.sets.length,1),6):(ex&&ex.dist?1:3));
+  const r=(tg&&tg.r!=null)?tg.r:(lp&&lp.sets[0]?lp.sets[0].r:(ex&&ex.dist?0:(ex&&ex.t?30:8)));
+  return{sets,r};
+}
+const tgStr=x=>{const ex=getEx(exIdOf(x)),t=effTarget(x);
+  if(!ex)return '';
+  if(!t.r)return t.sets+' set'+(t.sets===1?'':'s');
+  return t.sets+' × '+((ex.t||ex.dist)?fmtSec(t.r):t.r);};
 function lastStr(e){
   const lp=lastPerf(e.id); if(!lp)return '';
   if(e.dist){const bd=Math.max(...lp.sets.map(s=>s.d||0));if(bd>0)return fmtDist(bd);
@@ -626,6 +648,11 @@ function moveBtn(action,data,dir,atBound,label){
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"/></svg></button>`;
 }
 function arrMove(arr,i,dir){const j=i+dir;if(j<0||j>=arr.length)return;const [x]=arr.splice(i,1);arr.splice(j,0,x);}
+function ensureTg(si,xi){ // upgrade a plain id to a target object, seeded with what it already shows
+  const s=UI.builder.sections[si],x=s.exs[xi];
+  if(typeof x==='string'){const t=effTarget(x);s.exs[xi]={id:x,sets:t.sets,r:t.r};}
+  return s.exs[xi];
+}
 function builderHTML(){
   const b=UI.builder;
   if(b.step===1)return `
@@ -649,12 +676,25 @@ function builderHTML(){
           ${moveBtn('sec-move',{si},1,si===b.sections.length-1,'Move section down')}
           <button class="iconbtn" style="width:30px;height:30px" data-action="sec-del" data-si="${si}" aria-label="Remove section">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div></div>
-      ${s.exs.map((id,xi)=>{const e=getEx(id);return `<div class="row" style="padding:5px 0">
-        <span style="flex:1">${e?esc(e.name):'?'}</span>
-        ${moveBtn('sec-ex-move',{si,xi},-1,xi===0,'Move exercise up')}
-        ${moveBtn('sec-ex-move',{si,xi},1,xi===s.exs.length-1,'Move exercise down')}
-        <button class="iconbtn" style="width:26px;height:26px" data-action="sec-ex-del" data-si="${si}" data-xi="${xi}" aria-label="Remove exercise">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>`;}).join('')}
+      ${s.exs.map((x,xi)=>{const e=getEx(exIdOf(x));const t=effTarget(x);
+        const timed=e&&(e.t||e.dist);
+        return `<div style="padding:5px 0 2px">
+        <div class="row">
+          <span style="flex:1">${e?esc(e.name):'?'}</span>
+          ${moveBtn('sec-ex-move',{si,xi},-1,xi===0,'Move exercise up')}
+          ${moveBtn('sec-ex-move',{si,xi},1,xi===s.exs.length-1,'Move exercise down')}
+          <button class="iconbtn" style="width:26px;height:26px" data-action="sec-ex-del" data-si="${si}" data-xi="${xi}" aria-label="Remove exercise">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+        <div class="tgrow">
+          <span class="tglbl">Sets</span>
+          <button class="tstep" data-action="tg-sets" data-si="${si}" data-xi="${xi}" data-dir="-1" aria-label="Fewer sets">−</button>
+          <span class="tval num" id="tgv-${si}-${xi}-s">${t.sets}</span>
+          <button class="tstep" data-action="tg-sets" data-si="${si}" data-xi="${xi}" data-dir="1" aria-label="More sets">+</button>
+          <span class="tglbl" style="margin-left:6px">${timed?'Time':'Reps'}</span>
+          <button class="tstep" data-action="tg-r" data-si="${si}" data-xi="${xi}" data-dir="-1" aria-label="Decrease ${timed?'time':'reps'}">−</button>
+          <span class="tval num" id="tgv-${si}-${xi}-r">${timed?fmtSec(t.r):t.r}</span>
+          <button class="tstep" data-action="tg-r" data-si="${si}" data-xi="${xi}" data-dir="1" aria-label="Increase ${timed?'time':'reps'}">+</button>
+        </div></div>`;}).join('')}
       <button class="btn ghost sm" style="margin-top:6px" data-action="sec-add-ex" data-si="${si}">+ Exercises</button>
     </div>`).join('')}
     <div class="card"><div class="eyebrow" style="margin-bottom:8px">Add a section</div>
@@ -705,7 +745,7 @@ function pickerListHTML(){
   const q=b.q.trim().toLowerCase();
   const sec=b.addMode?null:(b.cur!=null?b.sections[b.cur]:null);
   const taken=b.addMode&&state.active?state.active.entries.map(e=>e.ex)
-    :(sec?sec.exs:[]);
+    :(sec?sec.exs.map(exIdOf):[]);
   // cardio section shows only conditioning; every other section shows its type PLUS conditioning
   const exFilter=(sec&&sec.kind==='cardio')?CARDIO_FILTER:(e=>t.f(e)||CARDIO_FILTER(e));
   let list=allEx().filter(exFilter)
@@ -733,7 +773,7 @@ function entriesFromSections(secs){
   const entries=[];
   for(const s of secs){
     const gs=assignGroups(s.kind,s.exs.length);
-    s.exs.forEach((id,i)=>{const en=makeEntry(id,gs[i]);if(en){en.sec=s.kind;entries.push(en);}});
+    s.exs.forEach((x,i)=>{const en=makeEntry(exIdOf(x),gs[i],exTgOf(x));if(en){en.sec=s.kind;entries.push(en);}});
   }
   return entries;
 }
@@ -752,7 +792,7 @@ function buildWorkout(mode,dateStr){
   const name=t.name+(kinds.length===1&&kinds[0]!=='straight'?' · '+secName(kinds[0]):'');
   if(mode==='plan'){
     state.planned.push({id:'p'+Date.now(),date:fromDateInput(dateStr),name,type:t.id,
-      sections:secs.map(s=>({kind:s.kind,exs:s.exs.slice()}))});
+      sections:cloneSecs(secs)});
     state.planned.sort((a,c)=>a.date<c.date?-1:1);
     save();closeSheet();UI.tab='home';UI.mode=null;render();
     toast('Scheduled for '+fmtDate(fromDateInput(dateStr)));return;
@@ -770,13 +810,13 @@ function startPlanned(id){
     name:p.name,type:p.type,entries:entriesFromSections(secs)};
   save();closeSheet();UI.mode='workout';render();
 }
-function makeEntry(exId,group){
+function makeEntry(exId,group,tg){
   const ex=getEx(exId); if(!ex)return null;
   const lp=lastPerf(exId),rec=recommend(ex);
-  const n=lp?Math.min(Math.max(lp.sets.length,1),6):(ex.dist?1:3);
+  const n=(tg&&tg.sets)?tg.sets:(lp?Math.min(Math.max(lp.sets.length,1),6):(ex.dist?1:3));
   const sets=Array.from({length:n},(_,k)=>{const prev=lp&&lp.sets[k];
     return{w:ex.dist?0:rec.w,
-      r:prev?prev.r:(ex.dist?0:(ex.t?30:8)),
+      r:(tg&&tg.r!=null)?tg.r:(prev?prev.r:(ex.dist?0:(ex.t?30:8))),
       d:prev?(prev.d||0):0,done:false};});
   return{ex:exId,group:group||'',sets};
 }
@@ -1095,7 +1135,7 @@ function plannedDetailHTML(id){
     <h2 class="display" style="margin:4px 0 14px">${esc(p.name)}</h2>
     ${secs.map(s=>`<div class="card" style="padding:12px 14px;margin-bottom:8px">
       <div class="grp" style="margin-bottom:4px">${secName(s.kind)||esc(s.kind)}</div>
-      ${s.exs.map(id=>{const e=getEx(id);return `<div class="tiny" style="padding:3px 0">${e?esc(e.name):'?'}${e&&e.t?' <span class="muted">· timed</span>':''}</div>`;}).join('')||'<div class="tiny muted">No exercises</div>'}
+      ${s.exs.map(x=>{const e=getEx(exIdOf(x));return `<div class="tiny spread" style="padding:3px 0"><span>${e?esc(e.name):'?'}</span><span class="muted num">${tgStr(x)}</span></div>`;}).join('')||'<div class="tiny muted">No exercises</div>'}
     </div>`).join('')}
     <div class="stack" style="margin-top:12px">
       <button class="btn primary" data-action="plan-start" data-id="${p.id}">Start now</button>
@@ -1126,7 +1166,7 @@ function templateDetailHTML(id){
     <h2 class="display" style="margin:4px 0 14px">${esc(t.name)}</h2>
     ${secs.map(s=>`<div class="card" style="padding:12px 14px;margin-bottom:8px">
       <div class="grp" style="margin-bottom:4px">${secName(s.kind)||esc(s.kind)}</div>
-      ${s.exs.map(id=>{const e=getEx(id);return `<div class="tiny" style="padding:3px 0">${e?esc(e.name):'?'}</div>`;}).join('')||'<div class="tiny muted">No exercises</div>'}
+      ${s.exs.map(x=>{const e=getEx(exIdOf(x));return `<div class="tiny spread" style="padding:3px 0"><span>${e?esc(e.name):'?'}</span><span class="muted num">${tgStr(x)}</span></div>`;}).join('')||'<div class="tiny muted">No exercises</div>'}
     </div>`).join('')}
     <div class="stack" style="margin-top:12px">
       <button class="btn primary" data-action="tpl-start" data-id="${t.id}">Start now</button>
@@ -1161,7 +1201,7 @@ function saveTemplateFromBuilder(){
   const kinds=[...new Set(secs.map(s=>s.kind))];
   const auto=t.name+(kinds.length===1&&kinds[0]!=='straight'?' · '+secName(kinds[0]):'');
   const name=(($('#tpl-savename')||{}).value||'').trim()||auto;
-  state.templates.push({id:'t'+Date.now(),name,type:b.type,sections:secs.map(s=>({kind:s.kind,exs:s.exs.slice()}))});
+  state.templates.push({id:'t'+Date.now(),name,type:b.type,sections:cloneSecs(secs)});
   save();closeSheet();UI.tab='home';UI.mode=null;render();toast('Saved to your workouts');
 }
 function sectionsFromWorkout(w){
@@ -1169,7 +1209,8 @@ function sectionsFromWorkout(w){
   for(const en of w.entries){ if(!getEx(en.ex))continue;
     const kind=en.sec||w.struct||'straight';
     if(!cur||cur.kind!==kind){cur={kind,exs:[]};secs.push(cur);}
-    cur.exs.push(en.ex);}
+    const s=doneSets(en); // carry what was actually done as the target
+    cur.exs.push(s.length?{id:en.ex,sets:s.length,r:s[0].r}:en.ex);}
   return secs;
 }
 function workoutDetailHTML(id){
@@ -1513,6 +1554,13 @@ const ACT={
   'sec-ex-del':el=>{UI.builder.sections[+el.dataset.si].exs.splice(+el.dataset.xi,1);$('#sheet').innerHTML=builderHTML();},
   'sec-move':el=>{arrMove(UI.builder.sections,+el.dataset.si,+el.dataset.dir);$('#sheet').innerHTML=builderHTML();},
   'sec-ex-move':el=>{arrMove(UI.builder.sections[+el.dataset.si].exs,+el.dataset.xi,+el.dataset.dir);$('#sheet').innerHTML=builderHTML();},
+  'tg-sets':el=>{const{si,xi}=el.dataset,t=ensureTg(+si,+xi);
+    t.sets=Math.max(1,Math.min(12,t.sets+ +el.dataset.dir));
+    $('#tgv-'+si+'-'+xi+'-s').textContent=t.sets;},
+  'tg-r':el=>{const{si,xi}=el.dataset,t=ensureTg(+si,+xi),ex=getEx(t.id);
+    const timed=ex&&(ex.t||ex.dist),step=timed?15:1;
+    t.r=Math.max(0,Math.min(timed?7200:100,t.r+step*(+el.dataset.dir)));
+    $('#tgv-'+si+'-'+xi+'-r').textContent=timed?fmtSec(t.r):t.r;},
   'b-picker-done':()=>{const b=UI.builder;b.sections[b.cur].exs.push(...b.sel);
     b.sel=[];b.step=2;$('#sheet').innerHTML=builderHTML();},
   'b-tostep4':()=>{UI.builder.step=4;$('#sheet').innerHTML=builderHTML();},
@@ -1536,7 +1584,7 @@ const ACT={
   'plan-start':el=>startPlanned(el.dataset.id),
   'plan-edit':el=>{
     const p=state.planned.find(x=>x.id===el.dataset.id); if(!p)return;
-    const secs=plannedSecs(p).map(s=>({kind:s.kind,exs:(s.exs||[]).slice()}));
+    const secs=cloneSecs(plannedSecs(p));
     UI.builder={step:2,type:p.type||'full',sections:secs,cur:null,sel:[],q:'',eq:'',addMode:false,editPlan:p.id};
     openSheet(builderHTML());},
   'b-saveplan':()=>{
@@ -1547,7 +1595,7 @@ const ACT={
     const kinds=[...new Set(secs.map(s=>s.kind))];
     p.type=b.type;
     p.name=t.name+(kinds.length===1&&kinds[0]!=='straight'?' · '+secName(kinds[0]):'');
-    p.sections=secs.map(s=>({kind:s.kind,exs:s.exs.slice()}));
+    p.sections=cloneSecs(secs);
     delete p.exs;delete p.struct;
     save();closeSheet();render();toast('Plan updated');},
   'plan-move':el=>openSheet(planMoveHTML(el.dataset.id)),
@@ -1659,27 +1707,27 @@ const ACT={
     const t=state.templates.find(x=>x.id===el.dataset.id); if(!t)return;
     const iso=fromDateInput(el.dataset.date);
     state.planned.push({id:'p'+Date.now(),date:iso,name:t.name,type:t.type,
-      sections:t.sections.map(s=>({kind:s.kind,exs:s.exs.slice()}))});
+      sections:cloneSecs(t.sections)});
     state.planned.sort((a,c)=>a.date<c.date?-1:1);
     save();closeSheet();render();toast('Scheduled for '+fmtDate(iso));},
   'tpl-sched-save':el=>{
     const t=state.templates.find(x=>x.id===el.dataset.id); if(!t)return;
     const v=$('#tpl-date').value; if(!v){toast('Pick a date first');return;}
     state.planned.push({id:'p'+Date.now(),date:fromDateInput(v),name:t.name,type:t.type,
-      sections:t.sections.map(s=>({kind:s.kind,exs:s.exs.slice()}))});
+      sections:cloneSecs(t.sections)});
     state.planned.sort((a,c)=>a.date<c.date?-1:1);
     save();closeSheet();UI.tab='home';UI.mode=null;render();
     toast('Scheduled for '+fmtDate(fromDateInput(v)));},
   'tpl-edit':el=>{
     const t=state.templates.find(x=>x.id===el.dataset.id); if(!t)return;
-    UI.builder={step:2,type:t.type||'full',sections:t.sections.map(s=>({kind:s.kind,exs:s.exs.slice()})),
+    UI.builder={step:2,type:t.type||'full',sections:cloneSecs(t.sections),
       cur:null,sel:[],q:'',eq:'',addMode:false,editTpl:t.id};
     openSheet(builderHTML());},
   'b-savetpl-edit':()=>{
     const b=UI.builder,secs=b.sections.filter(s=>s.exs.length);
     if(!secs.length){toast('Add at least one exercise');return;}
     const t=state.templates.find(x=>x.id===b.editTpl); if(!t){closeSheet();return;}
-    t.type=b.type;t.sections=secs.map(s=>({kind:s.kind,exs:s.exs.slice()}));
+    t.type=b.type;t.sections=cloneSecs(secs);
     save();closeSheet();render();toast('Saved workout updated');},
   'b-savetpl':()=>saveTemplateFromBuilder(),
   'tpl-del':el=>{if(!armed(el))return;
