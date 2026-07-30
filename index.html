@@ -451,7 +451,7 @@ const secName=id=>{const s=SECTIONS.find(k=>k.id===id);return s?s.name:'';};
 const CARDIO_FILTER=e=>e.m.includes('Conditioning')||e.p.includes('cond'); // cardio section shows conditioning exercises regardless of workout type
 
 /* ============ state ============ */
-const APP_VERSION='1.17';
+const APP_VERSION='1.18';
 const DBKEY='liftlab.v1';
 const blank=()=>({settings:{units:'lbs',rest:[30,60,90]},custom:[],workouts:[],bodyweight:[],planned:[],templates:[],active:null});
 let state=blank();
@@ -578,6 +578,9 @@ function render(){
   const app=$('#app');
   app.classList.toggle('workout',UI.mode==='workout');
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.tab===UI.tab));
+  // a live workout keeps the screen on and posts an ongoing notification
+  keepAwake(!!state.active&&UI.mode==='workout');
+  if(state.active)updateWorkoutNote(true); else clearWorkoutNote();
   const v=$('#view');
   if(UI.mode==='workout'&&state.active){v.innerHTML=viewWorkout();return;}
   v.innerHTML=({home:viewHome,exercises:viewExercises,history:viewHistory,body:viewBody})[UI.tab]();
@@ -1071,6 +1074,7 @@ function exDetailHTML(exId){
         <div class="tiny muted num">${fmtDateY(h.date)}</div>
         <div class="tiny num">${h.sets.map(s=>setStr(ex,s)).join(' · ')}</div>
       </div></div>`).join(''):`<div class="empty">No sessions yet — it will show up here once you log it in a workout.</div>`}
+    ${hist.length?`<button class="btn ghost" style="width:100%;margin-top:10px" data-action="ex-share" data-id="${exId}">Share this exercise with Claude</button>`:''}
     ${isCustom?`<button class="btn danger" style="margin-top:8px" data-action="del-custom" data-id="${exId}">Delete custom exercise</button>`:''}`;
 }
 function customFormHTML(){
@@ -1259,6 +1263,7 @@ function workoutDetailHTML(id){
       <p class="tiny" style="margin:0;white-space:pre-wrap">${esc(w.notes)}</p></div>`:''}
     <div class="tiny muted num" style="margin-top:10px">Total volume: ${fmtVol(workoutVol(w))} ${unit()}</div>
     <button class="btn ghost sm" style="width:100%;margin-top:10px" data-action="w-savetpl" data-id="${w.id}">Save as a workout I can reuse</button>
+    <button class="btn ghost sm" style="width:100%;margin-top:8px" data-action="w-share" data-id="${w.id}">Share this workout with Claude</button>
     <div class="row" style="gap:8px;margin-top:8px">
       <button class="btn ghost sm" style="flex:1" data-action="w-copy" data-id="${w.id}">Copy</button>
       <button class="btn ghost sm" style="flex:1" data-action="w-edit" data-id="${w.id}">Edit</button>
@@ -1321,6 +1326,68 @@ function progMetric(ex,sets){ // report each exercise in the unit it is actually
   if(w>0)return{v:w,fmt:fmtW};
   return{v:Math.max(...sets.map(s=>s.r||0)),fmt:v=>v+' reps'}; // bodyweight work progresses by reps
 }
+function workoutLines(w){ // one workout, rendered the same way everywhere it is exported
+  const L=[],c=setCounts(w);
+  L.push('### '+dkey(w.date)+' — '+w.name);
+  const meta=[];
+  if(w.dur)meta.push(w.dur+' min');
+  meta.push(c.working+' working set'+(c.working===1?'':'s'));
+  if(c.warmup)meta.push(c.warmup+' warmup');
+  if(c.cardio)meta.push(c.cardio+' cardio');
+  const wv=workoutVol(w); if(wv)meta.push(fmtVol(wv)+' '+unit()+' volume');
+  L.push(meta.join(' · '));
+  if(w.prs&&w.prs.length)L.push('PRs: '+w.prs.join(', '));
+  let lastSec=null;
+  for(const en of w.entries){
+    const ex=getEx(en.ex);const s=doneSets(en);if(!ex||!s.length)continue;
+    if(en.sec&&secKey(en)!==lastSec){L.push('');L.push('**'+(secName(en.sec)||en.sec)+'**');lastSec=secKey(en);}
+    const tag=en.group&&en.group!=='ROUND'?en.group+' ':'';
+    const extra=[];
+    if(en.rpe)extra.push('RPE '+en.rpe);
+    const rest=restOf(en);
+    if(rest)extra.push((en.group&&en.group!=='ROUND'?'cycle':'set-to-set')+' ~'+fmtSec(rest));
+    if((ex.hands||1)>1)extra.push('per hand, ×2 in volume');
+    L.push('- '+tag+ex.name+': '+s.map(x=>setStr(ex,x)).join(', ')+(extra.length?' — '+extra.join(', '):''));
+  }
+  if(w.notes){L.push('');L.push('Notes: '+w.notes.replace(/\n/g,' / '));}
+  return L;
+}
+function workoutReport(w){
+  return ['# LiftLab — single workout','',
+    'Exported '+fmtDateY(new Date().toISOString())+' · weights in '+unit()+' · distances in '+distUnit(),
+    'Dumbbell lifts are logged per hand; volume counts both.',
+    'Set-to-set is the gap between completed sets, so it includes the working set itself.','',
+    ...workoutLines(w),''].join('\n');
+}
+function exerciseReport(exId){
+  const ex=getEx(exId); if(!ex)return '';
+  const hist=exHistory(exId);
+  const L=['# LiftLab — '+ex.name,'',
+    ex.m.join(' / ')+' · '+ex.eq+((ex.hands||1)>1?' · logged per hand':''),
+    'Exported '+fmtDateY(new Date().toISOString())+' · weights in '+unit()+' · distances in '+distUnit(),
+    hist.length+' session'+(hist.length===1?'':'s')+' logged',''];
+  if(!hist.length){L.push('No sessions logged yet.');return L.join('\n');}
+  const first=progMetric(ex,hist[0].sets),last=progMetric(ex,hist[hist.length-1].sets);
+  const best=hist.reduce((b,h)=>{const m=progMetric(ex,h.sets);return m.v>b.v?m:b;},progMetric(ex,hist[0].sets));
+  L.push('Best: '+best.fmt(best.v));
+  L.push('First → latest: '+first.fmt(first.v)+' → '+last.fmt(last.v));
+  L.push('','## Sessions','');
+  for(const h of hist){
+    const w=state.workouts.find(x=>dkey(x.date)===dkey(h.date)&&x.entries.some(e=>e.ex===exId));
+    const en=w&&w.entries.find(e=>e.ex===exId);
+    const extra=[];
+    if(en&&en.rpe)extra.push('RPE '+en.rpe);
+    const rest=en?restOf(en):0;
+    if(rest)extra.push((en.group&&en.group!=='ROUND'?'cycle':'set-to-set')+' ~'+fmtSec(rest));
+    L.push('- '+dkey(h.date)+': '+h.sets.map(s=>setStr(ex,s)).join(', ')+(extra.length?' — '+extra.join(', '):''));
+  }
+  return L.join('\n');
+}
+async function shareText(title,txt){ // native share on mobile, clipboard everywhere else
+  if(navigator.share){try{await navigator.share({title,text:txt});return;}catch(_){return;}}
+  try{await navigator.clipboard.writeText(txt);toast('Copied — paste it into Claude');}
+  catch(_){toast('Could not copy on this browser');}
+}
 function restOf(en){ // median gap between completed sets, from their timestamps
   const ts=doneSets(en).map(s=>s.t).filter(Boolean).sort((a,b)=>a-b);
   if(ts.length<2)return 0;
@@ -1340,6 +1407,7 @@ function coachReport(days){
   L.push('');
   L.push('Exported '+fmtDateY(new Date().toISOString())+' · weights in '+unit()+' · distances in '+distUnit());
   L.push('Dumbbell lifts are logged per hand; volume counts both. Volume excludes timed and cardio work.');
+  L.push('Set-to-set is the measured gap between completed sets, so it includes the working set; for a superset it is the pair cycle.');
   L.push('Range: '+(days?'last '+days+' days':'all time')+' · '+ws.length+' workout'+(ws.length===1?'':'s'));
   L.push('');
   if(bw.length){
@@ -1363,31 +1431,7 @@ function coachReport(days){
   }
   L.push('## Workouts');
   L.push('');
-  for(const w of ws){
-    const c=setCounts(w);
-    L.push('### '+dkey(w.date)+' — '+w.name);
-    const meta=[];
-    if(w.dur)meta.push(w.dur+' min');
-    meta.push(c.working+' working set'+(c.working===1?'':'s'));
-    if(c.warmup)meta.push(c.warmup+' warmup');
-    if(c.cardio)meta.push(c.cardio+' cardio');
-    const wv=workoutVol(w); if(wv)meta.push(fmtVol(wv)+' '+unit()+' volume');
-    L.push(meta.join(' · '));
-    if(w.prs&&w.prs.length)L.push('PRs: '+w.prs.join(', '));
-    let lastSec=null;
-    for(const en of w.entries){
-      const ex=getEx(en.ex);const s=doneSets(en);if(!ex||!s.length)continue;
-      if(en.sec&&secKey(en)!==lastSec){L.push('');L.push('**'+(secName(en.sec)||en.sec)+'**');lastSec=secKey(en);}
-      const tag=en.group&&en.group!=='ROUND'?en.group+' ':'';
-      const extra=[];
-      if(en.rpe)extra.push('RPE '+en.rpe);
-      const rest=restOf(en); if(rest)extra.push('rest ~'+fmtSec(rest));
-      if((ex.hands||1)>1)extra.push('per hand, ×2 in volume');
-      L.push('- '+tag+ex.name+': '+s.map(x=>setStr(ex,x)).join(', ')+(extra.length?' — '+extra.join(', '):''));
-    }
-    if(w.notes){L.push('');L.push('Notes: '+w.notes.replace(/\n/g,' / '));}
-    L.push('');
-  }
+  for(const w of ws)L.push(...workoutLines(w),'');
   const keys=Object.keys(prog).sort();
   if(keys.length){
     L.push('## Progress in range (best set per exercise)');
@@ -1451,6 +1495,14 @@ function settingsHTML(){
           <span class="tiny muted">s</span></div>`).join('')}
       </div>
       <p class="tiny muted" style="margin:8px 0 0">The three rest-timer buttons shown during a workout, in seconds.</p></div>
+    <div class="card"><div class="eyebrow" style="margin-bottom:8px">Vibration</div>
+      <div class="seg"><button class="${state.settings.haptics!==false?'on':''}" data-action="haptics" data-id="on">On</button>
+      <button class="${state.settings.haptics===false?'on':''}" data-action="haptics" data-id="off">Off</button></div>
+      <p class="tiny muted" style="margin:8px 0 0">A short buzz confirms every tap, with a firmer one when a timer starts or finishes.</p></div>
+    <div class="card"><div class="eyebrow" style="margin-bottom:8px">Workout notification</div>
+      <div class="seg"><button class="${state.settings.notify?'on':''}" data-action="notify" data-id="on">On</button>
+      <button class="${!state.settings.notify?'on':''}" data-action="notify" data-id="off">Off</button></div>
+      <p class="tiny muted" style="margin:8px 0 0">Shows a notification while a workout is running with the elapsed time and any active timer, and alerts you when a rest or EMOM interval ends. Android only — iOS does not allow it.</p></div>
     <div class="card"><div class="eyebrow" style="margin-bottom:8px">Your data</div>
       <p class="tiny muted" style="margin:0 0 10px">${state.workouts.length} workouts · ${state.templates.length} saved workouts · ${state.bodyweight.length} body-weight entries · ${state.custom.length} custom exercises. Data lives in this browser — export a backup to move devices.</p>
       <div class="stack">
@@ -1561,11 +1613,12 @@ function amrapStart(min){
 function tickAmrap(){
   if(!amrapEnd)return;
   const left=Math.ceil((amrapEnd-Date.now())/1000);
-  if(left<=0){if(navigator.vibrate)navigator.vibrate([200,100,200,100,200]);amrapFinish();return;}
+  if(left<=0){buzz([200,100,200,100,200]);amrapFinish();return;}
   $('#amrapt').textContent=Math.floor(left/60)+':'+String(left%60).padStart(2,'0');
 }
 function amrapFinish(){
   const n=amrapRounds;amrapEnd=0;$('#amrappill').hidden=true;
+  timerNote('AMRAP complete',n+' round'+(n===1?'':'s'));updateWorkoutNote(true);
   if(state.active){
     const line='AMRAP: '+n+' round'+(n===1?'':'s');
     state.active.notes=(state.active.notes?state.active.notes.replace(/\nAMRAP: \d+ rounds?$/,'')+'\n':'')+line;
@@ -1574,20 +1627,69 @@ function amrapFinish(){
   toast('Time! '+n+' round'+(n===1?'':'s'));
 }
 
+/* ============ screen wake lock + workout notification ============ */
+let wakeLock=null;
+async function keepAwake(on){
+  try{
+    if(on){ if(!wakeLock&&navigator.wakeLock)wakeLock=await navigator.wakeLock.request('screen'); }
+    else if(wakeLock){await wakeLock.release();wakeLock=null;}
+  }catch(_){/* denied or unsupported — not worth surfacing */}
+}
+document.addEventListener('visibilitychange',()=>{ // locks drop when backgrounded; take it back
+  if(document.visibilityState==='visible'&&state.active&&UI.mode==='workout')keepAwake(true);
+});
+async function askNotify(){
+  if(!('Notification' in window))return false;
+  if(Notification.permission==='granted')return true;
+  if(Notification.permission==='denied')return false;
+  try{return (await Notification.requestPermission())==='granted';}catch(_){return false;}
+}
+let notifyAt=0;
+async function updateWorkoutNote(force){
+  if(!state.settings.notify||!('Notification' in window)||Notification.permission!=='granted')return;
+  if(!state.active){clearWorkoutNote();return;}
+  const now=Date.now();
+  if(!force&&now-notifyAt<5000)return; // notifications are not a 1 Hz display
+  notifyAt=now;
+  const reg=await navigator.serviceWorker.getRegistration(); if(!reg)return;
+  const bits=[elapsedStr()];
+  if(restEnd){const left=Math.max(0,Math.ceil((restEnd-now)/1000));
+    bits.push((restRepeat?'EMOM ':'Rest ')+Math.floor(left/60)+':'+String(left%60).padStart(2,'0'));}
+  if(amrapEnd){const left=Math.max(0,Math.ceil((amrapEnd-now)/1000));
+    bits.push('AMRAP '+Math.floor(left/60)+':'+String(left%60).padStart(2,'0')+' · '+amrapRounds+' rds');}
+  try{await reg.showNotification(state.active.name,{
+    body:bits.join('  ·  '),tag:'liftlab-workout',renotify:false,silent:true,
+    icon:'icon-192.png',badge:'icon-192.png',requireInteraction:true});}catch(_){}
+}
+async function clearWorkoutNote(){
+  try{const reg=await navigator.serviceWorker.getRegistration(); if(!reg)return;
+    (await reg.getNotifications({tag:'liftlab-workout'})).forEach(n=>n.close());
+    (await reg.getNotifications({tag:'liftlab-timer'})).forEach(n=>n.close());
+  }catch(_){}
+}
+async function timerNote(title,body){ // fires even when the app is backgrounded
+  if(!state.settings.notify||!('Notification' in window)||Notification.permission!=='granted')return;
+  try{const reg=await navigator.serviceWorker.getRegistration(); if(!reg)return;
+    await reg.showNotification(title,{body,tag:'liftlab-timer',icon:'icon-192.png',badge:'icon-192.png'});
+  }catch(_){}
+}
+
 /* ============ rest + elapsed timers ============ */
 let restEnd=0,restRepeat=false;
-function startRest(sec,rep){restEnd=Date.now()+sec*1000;restRepeat=!!rep;$('#restpill').hidden=false;tickRest();}
+function startRest(sec,rep){restEnd=Date.now()+sec*1000;restRepeat=!!rep;$('#restpill').hidden=false;tickRest();updateWorkoutNote(true);}
 function tickRest(){
   if(!restEnd)return;
   const left=Math.ceil((restEnd-Date.now())/1000);
   if(left<=0){
-    if(navigator.vibrate)navigator.vibrate([160,80,160]);
-    if(restRepeat){restEnd+=60000;toast('New minute — go');tickRest();return;}
-    restEnd=0;$('#restpill').hidden=true;toast('Rest over — go');return;}
+    buzz([160,80,160]);
+    if(restRepeat){restEnd+=60000;toast('New minute — go');timerNote('New minute','EMOM — go');tickRest();return;}
+    restEnd=0;$('#restpill').hidden=true;toast('Rest over — go');timerNote('Rest over','Next set — go');
+    updateWorkoutNote(true);return;}
   $('#restt').textContent=(restRepeat?'EMOM ':'')+Math.floor(left/60)+':'+String(left%60).padStart(2,'0');
 }
 setInterval(()=>{tickRest();tickAmrap();
-  const el=$('#elapsed'); if(el&&state.active)el.textContent=elapsedStr();},500);
+  const el=$('#elapsed'); if(el&&state.active)el.textContent=elapsedStr();
+  updateWorkoutNote();},500);
 
 /* ============ mutations ============ */
 function setVal(ei,si,field,raw){
@@ -1702,8 +1804,7 @@ const ACT={
     s.done=!s.done;
     if(s.done)s.t=Date.now(); else delete s.t; // timestamps let the export report real rest
     save();
-    document.getElementById(`srow-${ei}-${si}`).classList.toggle('done',s.done);
-    if(s.done&&navigator.vibrate)navigator.vibrate(12);},
+    document.getElementById(`srow-${ei}-${si}`).classList.toggle('done',s.done);},
   'add-set':el=>{
     const en=state.active.entries[el.dataset.ei];
     const lastSet=en.sets[en.sets.length-1];
@@ -1720,7 +1821,7 @@ const ACT={
   'amrap-go':el=>{const m=el.dataset.min?+el.dataset.min:parseFloat(($('#amrap-custom')||{}).value);
     if(!m||m<=0){toast('Enter a time cap');return;}
     amrapStart(m);closeSheet();},
-  'amrap-round':()=>{amrapRounds++;$('#amrapr').textContent=amrapRounds;if(navigator.vibrate)navigator.vibrate(12);},
+  'amrap-round':()=>{amrapRounds++;$('#amrapr').textContent=amrapRounds;},
   'amrap-stop':()=>amrapFinish(),
   finish:()=>finishWorkout(),
   discard:el=>{if(!armed(el))return;
@@ -1829,6 +1930,14 @@ const ACT={
   'del-bw':el=>{state.bodyweight=state.bodyweight.filter(x=>x.date!==el.dataset.id);save();render();},
   units:el=>{state.settings.units=el.dataset.id;save();render();openSheet(settingsHTML(),'settings');},
   machines:el=>{state.settings.hideMachines=el.dataset.id==='hide';save();openSheet(settingsHTML(),'settings');},
+  haptics:el=>{state.settings.haptics=el.dataset.id==='on';save();openSheet(settingsHTML(),'settings');
+    if(state.settings.haptics)buzz(30);},
+  notify:async el=>{
+    const want=el.dataset.id==='on';
+    if(want&&!(await askNotify())){toast('Notifications are blocked in your browser settings');return;}
+    state.settings.notify=want;save();openSheet(settingsHTML(),'settings');
+    if(want){updateWorkoutNote(true);toast(state.active?'Notification on':'Shows up once a workout starts');}
+    else clearWorkoutNote();},
   export:()=>{
     const blob=new Blob([JSON.stringify(state,null,1)],{type:'application/json'});
     const a=document.createElement('a');a.href=URL.createObjectURL(blob);
@@ -1837,6 +1946,10 @@ const ACT={
   wipe:el=>{if(!armed(el))return;
     state=blank();save();closeSheet();render();toast('All data erased');},
   'coach-export':()=>{UI.expDays=28;openSheet(coachSheetHTML());},
+  'w-share':el=>{const w=state.workouts.find(x=>x.id===el.dataset.id);
+    if(w)shareText('LiftLab — '+w.name,workoutReport(w));},
+  'ex-share':el=>{const ex=getEx(el.dataset.id);
+    if(ex)shareText('LiftLab — '+ex.name,exerciseReport(el.dataset.id));},
   'exp-range':el=>{UI.expDays=+el.dataset.d;$('#sheet').innerHTML=coachSheetHTML();},
   'exp-copy':async()=>{
     const txt=coachReport(UI.expDays===undefined?28:UI.expDays);
@@ -1871,9 +1984,14 @@ function importFile(e){
 }
 
 /* ============ wiring ============ */
+/* light haptic on every control, a firmer one for timer starts */
+const HEAVY_TAPS=new Set(['rest','amrap-go','amrap-round','done','finish','save-workout','plan-start','tpl-start']);
+const buzz=ms=>{if(state.settings.haptics!==false&&navigator.vibrate)navigator.vibrate(ms);};
 document.addEventListener('click',e=>{
   const el=e.target.closest('[data-action]');
-  if(el&&ACT[el.dataset.action])ACT[el.dataset.action](el,e);
+  if(!el||!ACT[el.dataset.action])return;
+  buzz(HEAVY_TAPS.has(el.dataset.action)?30:12);
+  ACT[el.dataset.action](el,e);
 });
 document.addEventListener('input',e=>{
   const el=e.target,f=el.dataset&&el.dataset.field;
