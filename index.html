@@ -451,7 +451,7 @@ const secName=id=>{const s=SECTIONS.find(k=>k.id===id);return s?s.name:'';};
 const CARDIO_FILTER=e=>e.m.includes('Conditioning')||e.p.includes('cond'); // cardio section shows conditioning exercises regardless of workout type
 
 /* ============ state ============ */
-const APP_VERSION='1.18';
+const APP_VERSION='1.19';
 const DBKEY='liftlab.v1';
 const blank=()=>({settings:{units:'lbs',rest:[30,60,90]},custom:[],workouts:[],bodyweight:[],planned:[],templates:[],active:null});
 let state=blank();
@@ -460,6 +460,12 @@ state.custom.forEach(e=>{e.m=[].concat(e.m||e.g||'Other');}); // migrate single-
 if(!Array.isArray(state.settings.rest)||state.settings.rest.length!==3)state.settings.rest=[30,60,90]; // migrate rest defaults
 if(!Array.isArray(state.templates))state.templates=[]; // migrate saved workouts
 state.custom.forEach(e=>{if(!e.hands)e.hands=1;}); // migrate per-hand flag
+/* barbell + plate inventory, stored canonically in lb like every other weight */
+const PLATES_LB=[45,35,25,10,5,2.5],PLATES_KG=[25,20,15,10,5,2.5,1.25];
+const KG2LB=2.20462; // LBKG is declared further down; keep this migration self-contained
+if(state.settings.bar==null)state.settings.bar=state.settings.units==='kg'?20*KG2LB:45;
+if(!Array.isArray(state.settings.plates)||!state.settings.plates.length)
+  state.settings.plates=(state.settings.units==='kg'?PLATES_KG.map(p=>p*KG2LB):PLATES_LB.slice());
 const save=()=>{try{localStorage.setItem(DBKEY,JSON.stringify(state));}catch(e){toast('Could not save — storage unavailable');}};
 
 const UI={tab:'home',mode:state.active?'workout':null,exq:'',exg:'',metric:'top',
@@ -885,8 +891,12 @@ function entryHTML(en,ei){
     <div class="spread">
       <div>${en.group&&en.group!=='ROUND'?`<div class="grp">${en.group}</div>`:''}
         <div style="font-weight:800;font-size:16px">${esc(ex.name)}</div></div>
+      <div class="row" style="gap:4px">
+      ${ex.eq==='Barbell'?`<button class="iconbtn" style="width:34px;height:34px" data-action="plates-open"
+        data-w="${Math.max(...en.sets.map(s=>s.w),0)}" aria-label="Plate calculator" title="Plate calculator">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6.5 7v10M17.5 7v10M3.5 9.5v5M20.5 9.5v5M6.5 12h11"/></svg></button>`:''}
       <button class="iconbtn" style="width:34px;height:34px" data-action="rm-ex" data-ei="${ei}" aria-label="Remove exercise">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
     </div>
     ${prev?`<div class="prevline num">${prev}</div>`:''}
     <div class="rec ${rec.cls}">${rec.cls==='neutral'?'':'▲ '}${esc(rec.note)}</div>
@@ -1302,6 +1312,51 @@ function viewBody(){
 }
 
 /* ============ settings sheet ============ */
+/* ============ barbell plate calculator ============ */
+function plateSolve(targetLb){
+  const bar=state.settings.bar||0;
+  const plates=(state.settings.plates||[]).slice().sort((a,b)=>b-a);
+  if(targetLb<bar-1e-6)return{under:true,bar};
+  let rem=(targetLb-bar)/2;const used=[];
+  for(const p of plates)while(rem>=p-1e-6){used.push(p);rem-=p;}   // greedy is optimal for standard sets
+  const loaded=used.reduce((a,p)=>a+p,0);
+  return{bar,used,achieved:bar+loaded*2,short:rem*2};
+}
+function plateSheetHTML(){
+  const target=UI.calcW||0,r=plateSolve(target);
+  const step=2*Math.min(...(state.settings.plates.length?state.settings.plates:[2.5])); // one pair of the smallest plate
+  const rows=[];
+  if(!r.under)for(const p of [...new Set(r.used)])rows.push([p,r.used.filter(x=>x===p).length]);
+  const exact=!r.under&&r.short<0.01;
+  return `<div class="grab"></div>
+    <div class="eyebrow">Barbell</div>
+    <h2 class="display" style="margin:4px 0 12px">Plate calculator</h2>
+    <div class="card"><div class="spread">
+      <button class="step" style="width:44px;height:46px" data-action="calc-step" data-d="-1" aria-label="Lower target">−</button>
+      <div style="text-align:center">
+        <div class="num" style="font-weight:800;font-size:30px;letter-spacing:-.02em">${fmtN(dispW(target))}</div>
+        <div class="tiny muted">${unit()} target</div></div>
+      <button class="step" style="width:44px;height:46px" data-action="calc-step" data-d="1" aria-label="Raise target">+</button>
+    </div></div>
+    ${r.under?`<div class="card"><p class="tiny muted" style="margin:0">That is lighter than the bar on its own (${fmtW(r.bar)}).</p></div>`:`
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:8px">Each side</div>
+      ${rows.length?`<div class="chips">${rows.map(([p,n])=>
+        `<span class="chip on" style="font-size:15px">${n>1?n+' × ':''}${fmtN(dispW(p))}</span>`).join('')}</div>`
+        :`<p class="tiny muted" style="margin:0">Empty bar — no plates needed.</p>`}
+      <p class="tiny muted num" style="margin:10px 0 0">${fmtN(dispW(r.bar))} bar${rows.length?' + 2 × ('+rows.map(([p,n])=>(n>1?n+'×':'')+fmtN(dispW(p))).join(' + ')+')':''} = <b>${fmtN(dispW(r.achieved))} ${unit()}</b></p>
+      ${exact?'':`<p class="tiny" style="margin:8px 0 0;color:var(--brass)">Cannot hit ${fmtN(dispW(target))} exactly with your plates — closest below is ${fmtN(dispW(r.achieved))}.</p>`}
+    </div>`}
+    <div class="card"><div class="eyebrow" style="margin-bottom:8px">Your bar</div>
+      <div class="row"><input type="number" inputmode="decimal" step="any" min="0" id="bar-w" value="${fmtN(dispW(state.settings.bar))}" aria-label="Bar weight">
+        <span class="tiny muted" style="flex:none">${unit()}</span>
+        <button class="btn ghost sm" style="flex:none" data-action="calc-bar">Set</button></div>
+      <div class="eyebrow" style="margin:12px 0 8px">Plates you own (per pair)</div>
+      <div class="chips">${(state.settings.units==='kg'?PLATES_KG.map(p=>p*LBKG):PLATES_LB).map(p=>
+        `<button class="chip ${state.settings.plates.some(x=>Math.abs(x-p)<0.01)?'on':''}" data-action="calc-plate" data-p="${p}">${fmtN(dispW(p))}</button>`).join('')}</div>
+      <p class="tiny muted" style="margin:8px 0 0">Tap to add or remove a size. Steps of ${fmtN(dispW(step))} ${unit()} are what your smallest pair allows.</p></div>`;
+}
+
 /* ============ coaching export (readable report for Claude) ============ */
 const isCardioEntry=(en,ex)=>!!(ex&&ex.dist)||en.sec==='cardio';
 function setCounts(w){ // warmup / cardio / stretch sets are not progression sets
@@ -1495,6 +1550,9 @@ function settingsHTML(){
           <span class="tiny muted">s</span></div>`).join('')}
       </div>
       <p class="tiny muted" style="margin:8px 0 0">The three rest-timer buttons shown during a workout, in seconds.</p></div>
+    <div class="card"><div class="eyebrow" style="margin-bottom:8px">Barbell</div>
+      <p class="tiny muted num" style="margin:0 0 10px">Bar ${fmtW(state.settings.bar)} · plates ${state.settings.plates.slice().sort((a,b)=>b-a).map(p=>fmtN(dispW(p))).join(', ')}</p>
+      <button class="btn ghost sm" data-action="plates-open" data-w="${state.settings.bar}">Open plate calculator</button></div>
     <div class="card"><div class="eyebrow" style="margin-bottom:8px">Vibration</div>
       <div class="seg"><button class="${state.settings.haptics!==false?'on':''}" data-action="haptics" data-id="on">On</button>
       <button class="${state.settings.haptics===false?'on':''}" data-action="haptics" data-id="off">Off</button></div>
@@ -1945,6 +2003,19 @@ const ACT={
     a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000);},
   wipe:el=>{if(!armed(el))return;
     state=blank();save();closeSheet();render();toast('All data erased');},
+  'plates-open':el=>{UI.calcW=+el.dataset.w||state.settings.bar;openSheet(plateSheetHTML());},
+  'calc-step':el=>{
+    const step=2*Math.min(...(state.settings.plates.length?state.settings.plates:[2.5]));
+    UI.calcW=Math.max(0,(UI.calcW||0)+step*(+el.dataset.d));
+    $('#sheet').innerHTML=plateSheetHTML();},
+  'calc-bar':()=>{
+    const v=parseFloat($('#bar-w').value);
+    if(isNaN(v)||v<0){toast('Enter a bar weight');return;}
+    state.settings.bar=toCanon(v);save();$('#sheet').innerHTML=plateSheetHTML();},
+  'calc-plate':el=>{
+    const p=+el.dataset.p,i=state.settings.plates.findIndex(x=>Math.abs(x-p)<0.01);
+    if(i>=0)state.settings.plates.splice(i,1); else state.settings.plates.push(p);
+    state.settings.plates.sort((a,b)=>b-a);save();$('#sheet').innerHTML=plateSheetHTML();},
   'coach-export':()=>{UI.expDays=28;openSheet(coachSheetHTML());},
   'w-share':el=>{const w=state.workouts.find(x=>x.id===el.dataset.id);
     if(w)shareText('LiftLab — '+w.name,workoutReport(w));},
