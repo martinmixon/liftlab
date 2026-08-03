@@ -147,6 +147,13 @@
   .rpebtn{width:32px;height:30px;border-radius:9px;background:var(--raised);border:1px solid var(--line);
     color:var(--ink2);font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;}
   .rpebtn.on{background:var(--brass-dim);border-color:var(--brass);color:var(--brass);}
+  .recrow{display:flex;align-items:center;gap:8px;margin:4px 0 10px;}
+  .recrow .rec{margin:0;}
+  .bump{flex:none;min-width:34px;height:30px;padding:0 9px;border-radius:9px;background:var(--raised);
+    border:1px solid var(--line);color:var(--ink2);font-size:13px;font-weight:800;font-variant-numeric:tabular-nums;}
+  .bump.up{background:var(--brass-dim);border-color:var(--brass);color:var(--brass);}
+  .bump:disabled{opacity:.35;}
+  .bump:active{filter:brightness(1.2);}
   .plateviz{overflow-x:auto;padding:2px 0;}
   .plateviz svg{display:block;width:100%;min-width:168px;height:auto;}
   .step{width:30px;height:42px;flex:none;border-radius:9px;background:var(--raised);border:1px solid var(--line);
@@ -453,7 +460,7 @@ const secName=id=>{const s=SECTIONS.find(k=>k.id===id);return s?s.name:'';};
 const CARDIO_FILTER=e=>e.m.includes('Conditioning')||e.p.includes('cond'); // cardio section shows conditioning exercises regardless of workout type
 
 /* ============ state ============ */
-const APP_VERSION='1.20';
+const APP_VERSION='1.21';
 const DBKEY='liftlab.v1';
 const blank=()=>({settings:{units:'lbs',rest:[30,60,90]},custom:[],workouts:[],bodyweight:[],planned:[],templates:[],active:null});
 let state=blank();
@@ -559,12 +566,19 @@ function recommend(ex){
     return{w:top,note:'Beat '+fmtSec(br)+(top>0?' @ '+fmtW(top):''),cls:''};}
   if(top===0){const br=Math.max(...lp.sets.map(s=>s.r));
     return{w:0,note:'Beat '+br+' reps',cls:''};}
+  // hold last session's load; moving up is a deliberate tap, never automatic
   const allHit=lp.sets.every(s=>s.r>=8);
-  if(!allHit)return{w:top,note:'Repeat '+fmtW(top)+' — chase 8s',cls:'neutral'};
-  const lower=ex.r==='L';
-  const incD=state.settings.units==='kg'?(lower?5:2.5):(lower?10:5);
-  const newD=roundInc(dispW(top)+incD);
-  return{w:toCanon(newD),note:'Move up: '+fmtN(newD)+' '+unit(),cls:''};
+  return allHit
+    ? {w:top,note:'Last: '+fmtW(top)+' — hit every set',cls:'',ready:true}
+    : {w:top,note:'Last: '+fmtW(top),cls:'neutral',ready:false};
+}
+/* smallest jump the gear actually allows */
+function nextWeightStep(ex){
+  if(ex&&ex.eq==='Barbell'){
+    const ps=(state.settings.plates||[]).filter(p=>p>0);
+    if(ps.length)return 2*Math.min(...ps); // a pair of the smallest plate
+  }
+  return toCanon(state.settings.units==='kg'?2.5:5);
 }
 function bestMetric(exId,fn,excludeId){
   let best=0;
@@ -849,7 +863,7 @@ function makeEntry(exId,group,tg){
   const lp=lastPerf(exId),rec=recommend(ex);
   const n=(tg&&tg.sets)?tg.sets:(lp?Math.min(Math.max(lp.sets.length,1),6):(ex.dist?1:3));
   const sets=Array.from({length:n},(_,k)=>{const prev=lp&&lp.sets[k];
-    return{w:ex.dist?0:rec.w,
+    return{w:ex.dist?0:(prev?prev.w:rec.w), // repeat last session set for set
       r:(tg&&tg.r!=null)?tg.r:(prev?prev.r:(ex.dist?0:(ex.t?30:8))),
       d:prev?(prev.d||0):0,done:false};});
   return{ex:exId,group:group||'',sets};
@@ -901,7 +915,17 @@ function entryHTML(en,ei){
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
     </div>
     ${prev?`<div class="prevline num">${prev}</div>`:''}
-    <div class="rec ${rec.cls}">${rec.cls==='neutral'?'':'▲ '}${esc(rec.note)}</div>
+    <div class="recrow">
+      <div class="rec ${rec.cls}">${rec.ready?'▲ ':''}${esc(rec.note)}</div>
+      ${(!ex.dist&&!ex.bw)?(()=>{
+        const cur=Math.max(...en.sets.map(s=>s.w),0),step=nextWeightStep(ex);
+        return `<div class="row" style="gap:4px;margin-left:auto">
+          <button class="bump" data-action="bump" data-ei="${ei}" data-d="-1" ${cur<step-1e-6?'disabled':''}
+            aria-label="Drop to ${fmtN(dispW(Math.max(0,cur-step)))} ${unit()}">−</button>
+          <button class="bump up" data-action="bump" data-ei="${ei}" data-d="1"
+            aria-label="Move up to ${fmtN(dispW(cur+step))} ${unit()}">+${fmtN(dispW(step))}</button>
+        </div>`;})():''}
+    </div>
     ${sheadHTML(ex)}
     ${en.sets.map((s,si)=>setRowHTML(en,ei,s,si,ex)).join('')}
     <div class="setbtns">
@@ -1892,6 +1916,15 @@ const ACT={
     const{ei,si}=el.dataset,s=state.active.entries[ei].sets[si];
     s.r=Math.max(0,(s.r||0)+ +el.dataset.d);save();
     document.querySelector(`#srow-${ei}-${si} [data-field=r]`).value=s.r||'';},
+  bump:el=>{
+    const en=state.active.entries[el.dataset.ei],ex=getEx(en.ex); if(!ex)return;
+    const step=nextWeightStep(ex)*(+el.dataset.d);
+    const cur=Math.max(...en.sets.map(s=>s.w),0);
+    const nv=Math.max(0,cur+step);
+    en.sets.forEach(s=>{if(!s.done)s.w=nv;}); // completed sets keep what you actually lifted
+    save();
+    const y=window.scrollY;render();window.scrollTo(0,y);
+    toast(nv>cur?'Moved up to '+fmtW(nv):'Dropped to '+fmtW(nv));},
   rpe:el=>{
     const en=state.active.entries[el.dataset.ei],v=+el.dataset.v;
     en.rpe=en.rpe===v?null:v;save();
