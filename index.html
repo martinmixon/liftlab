@@ -147,6 +147,8 @@
   .rpebtn{width:32px;height:30px;border-radius:9px;background:var(--raised);border:1px solid var(--line);
     color:var(--ink2);font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;}
   .rpebtn.on{background:var(--brass-dim);border-color:var(--brass);color:var(--brass);}
+  .plateviz{overflow-x:auto;padding:2px 0;}
+  .plateviz svg{display:block;width:100%;min-width:168px;height:auto;}
   .step{width:30px;height:42px;flex:none;border-radius:9px;background:var(--raised);border:1px solid var(--line);
     color:var(--ink2);font-size:18px;font-weight:700;line-height:1;}
   .step:active{background:var(--grid);}
@@ -451,7 +453,7 @@ const secName=id=>{const s=SECTIONS.find(k=>k.id===id);return s?s.name:'';};
 const CARDIO_FILTER=e=>e.m.includes('Conditioning')||e.p.includes('cond'); // cardio section shows conditioning exercises regardless of workout type
 
 /* ============ state ============ */
-const APP_VERSION='1.19';
+const APP_VERSION='1.20';
 const DBKEY='liftlab.v1';
 const blank=()=>({settings:{units:'lbs',rest:[30,60,90]},custom:[],workouts:[],bodyweight:[],planned:[],templates:[],active:null});
 let state=blank();
@@ -1322,6 +1324,46 @@ function plateSolve(targetLb){
   const loaded=used.reduce((a,p)=>a+p,0);
   return{bar,used,achieved:bar+loaded*2,short:rem*2};
 }
+function plateGraphic(r){
+  const plates=r.used; // solver already returns largest -> smallest
+  const owned=state.settings.plates.length?state.settings.plates:[45];
+  const maxP=Math.max(...owned);
+  const H=132,mid=58,labelY=118;
+  const diam=p=>Math.max(0.38,Math.pow(p/maxP,0.35))*96;  // bigger plates stand taller
+  const thick=p=>7+15*Math.pow(p/maxP,0.6);               // and sit thicker on the sleeve
+  const collarW=15,gap=3.5,tipW=13;
+  let x=collarW+7;
+  // thin plates still need room for their label underneath, so keep a minimum pitch
+  const items=plates.map(p=>{const w=thick(p),h=diam(p),it={p,x,w,h};x+=Math.max(w+gap,23);return it;});
+  const W=Math.round(Math.max(168,x+tipW+10));
+  const label=plates.length
+    ? plates.map(p=>fmtN(dispW(p))).join(' + ')+' per side'
+    : 'empty bar';
+  return `<div class="plateviz">
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Bar sleeve loaded with ${esc(label)}">
+      <defs>
+        <linearGradient id="steel" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#4A535C"/><stop offset="0.5" stop-color="#767F88"/><stop offset="1" stop-color="#39414A"/>
+        </linearGradient>
+        <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#2B3138"/><stop offset="0.5" stop-color="#3C444D"/><stop offset="1" stop-color="#232830"/>
+        </linearGradient>
+      </defs>
+      <!-- shaft running back toward the middle of the bar -->
+      <rect x="0" y="${mid-7}" width="${W-tipW-2}" height="14" rx="3" fill="url(#steel)"/>
+      <!-- inside collar the plates load against -->
+      <rect x="${collarW-9}" y="${mid-19}" width="9" height="38" rx="2.5" fill="url(#steel)" stroke="rgba(0,0,0,.35)"/>
+      ${items.map(it=>`
+        <rect x="${it.x.toFixed(1)}" y="${(mid-it.h/2).toFixed(1)}" width="${it.w.toFixed(1)}" height="${it.h.toFixed(1)}"
+          rx="3.5" fill="url(#plate)" stroke="var(--brass)" stroke-width="1.4"/>
+        <text x="${(it.x+it.w/2).toFixed(1)}" y="${labelY}" text-anchor="middle"
+          font-size="12" font-weight="800" fill="var(--brass)"
+          style="font-variant-numeric:tabular-nums">${fmtN(dispW(it.p))}</text>`).join('')}
+      <!-- sleeve end -->
+      <rect x="${W-tipW-2}" y="${mid-10}" width="${tipW}" height="20" rx="3" fill="url(#steel)"/>
+      ${plates.length?'':`<text x="${W/2}" y="${labelY}" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink3)">no plates needed</text>`}
+    </svg></div>`;
+}
 function plateSheetHTML(){
   const target=UI.calcW||0,r=plateSolve(target);
   const step=2*Math.min(...(state.settings.plates.length?state.settings.plates:[2.5])); // one pair of the smallest plate
@@ -1340,10 +1382,8 @@ function plateSheetHTML(){
     </div></div>
     ${r.under?`<div class="card"><p class="tiny muted" style="margin:0">That is lighter than the bar on its own (${fmtW(r.bar)}).</p></div>`:`
     <div class="card">
-      <div class="eyebrow" style="margin-bottom:8px">Each side</div>
-      ${rows.length?`<div class="chips">${rows.map(([p,n])=>
-        `<span class="chip on" style="font-size:15px">${n>1?n+' × ':''}${fmtN(dispW(p))}</span>`).join('')}</div>`
-        :`<p class="tiny muted" style="margin:0">Empty bar — no plates needed.</p>`}
+      <div class="eyebrow" style="margin-bottom:8px">Each side — load largest first</div>
+      ${plateGraphic(r)}
       <p class="tiny muted num" style="margin:10px 0 0">${fmtN(dispW(r.bar))} bar${rows.length?' + 2 × ('+rows.map(([p,n])=>(n>1?n+'×':'')+fmtN(dispW(p))).join(' + ')+')':''} = <b>${fmtN(dispW(r.achieved))} ${unit()}</b></p>
       ${exact?'':`<p class="tiny" style="margin:8px 0 0;color:var(--brass)">Cannot hit ${fmtN(dispW(target))} exactly with your plates — closest below is ${fmtN(dispW(r.achieved))}.</p>`}
     </div>`}
