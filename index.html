@@ -143,6 +143,8 @@
     color:var(--ink2);font-size:15px;font-weight:700;line-height:1;}
   .tstep:active{background:var(--grid);}
   .tval{min-width:34px;text-align:center;font-weight:800;font-size:14px;}
+  .tvalin{width:44px;min-width:0;padding:5px 2px;text-align:center;font-weight:800;font-size:14px;
+    background:var(--raised);border:1px solid var(--line);border-radius:8px;}
   .rperow{display:flex;align-items:center;gap:5px;margin-top:10px;}
   .rpebtn{width:32px;height:30px;border-radius:9px;background:var(--raised);border:1px solid var(--line);
     color:var(--ink2);font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;}
@@ -460,7 +462,7 @@ const secName=id=>{const s=SECTIONS.find(k=>k.id===id);return s?s.name:'';};
 const CARDIO_FILTER=e=>e.m.includes('Conditioning')||e.p.includes('cond'); // cardio section shows conditioning exercises regardless of workout type
 
 /* ============ state ============ */
-const APP_VERSION='1.21';
+const APP_VERSION='1.22';
 const DBKEY='liftlab.v1';
 const blank=()=>({settings:{units:'lbs',rest:[30,60,90]},custom:[],workouts:[],bodyweight:[],planned:[],templates:[],active:null});
 let state=blank();
@@ -724,12 +726,21 @@ function builderHTML(){
         <div class="tgrow">
           <span class="tglbl">Sets</span>
           <button class="tstep" data-action="tg-sets" data-si="${si}" data-xi="${xi}" data-dir="-1" aria-label="Fewer sets">−</button>
-          <span class="tval num" id="tgv-${si}-${xi}-s">${t.sets}</span>
+          <input class="tvalin num" type="number" inputmode="numeric" min="1" max="12" step="1" value="${t.sets}"
+            id="tgv-${si}-${xi}-s" data-field="tgsets" data-si="${si}" data-xi="${xi}" aria-label="Target sets">
           <button class="tstep" data-action="tg-sets" data-si="${si}" data-xi="${xi}" data-dir="1" aria-label="More sets">+</button>
           <span class="tglbl" style="margin-left:6px">${timed?'Time':'Reps'}</span>
-          <button class="tstep" data-action="tg-r" data-si="${si}" data-xi="${xi}" data-dir="-1" aria-label="Decrease ${timed?'time':'reps'}">−</button>
-          <span class="tval num" id="tgv-${si}-${xi}-r">${timed?fmtSec(t.r):t.r}</span>
-          <button class="tstep" data-action="tg-r" data-si="${si}" data-xi="${xi}" data-dir="1" aria-label="Increase ${timed?'time':'reps'}">+</button>
+          ${timed?`<span class="tfld" style="gap:2px">
+            <input class="tvalin num" type="number" inputmode="numeric" min="0" max="180" step="1" value="${Math.floor(t.r/60)||''}"
+              placeholder="0" id="tgv-${si}-${xi}-m" data-field="tgmin" data-si="${si}" data-xi="${xi}" aria-label="Target minutes">
+            <span class="colon">:</span>
+            <input class="tvalin num" type="number" inputmode="numeric" min="0" max="59" step="1" value="${t.r%60?String(t.r%60).padStart(2,'0'):'00'}"
+              id="tgv-${si}-${xi}-sec" data-field="tgsec" data-si="${si}" data-xi="${xi}" aria-label="Target seconds">
+          </span>`:`
+          <button class="tstep" data-action="tg-r" data-si="${si}" data-xi="${xi}" data-dir="-1" aria-label="Decrease reps">−</button>
+          <input class="tvalin num" type="number" inputmode="numeric" min="0" max="100" step="1" value="${t.r}"
+            id="tgv-${si}-${xi}-r" data-field="tgreps" data-si="${si}" data-xi="${xi}" aria-label="Target reps">
+          <button class="tstep" data-action="tg-r" data-si="${si}" data-xi="${xi}" data-dir="1" aria-label="Increase reps">+</button>`}
         </div></div>`;}).join('')}
       <button class="btn ghost sm" style="margin-top:6px" data-action="sec-add-ex" data-si="${si}">+ Exercises</button>
     </div>`).join('')}
@@ -1110,7 +1121,7 @@ function exDetailHTML(exId){
         <div class="tiny muted num">${fmtDateY(h.date)}</div>
         <div class="tiny num">${h.sets.map(s=>setStr(ex,s)).join(' · ')}</div>
       </div></div>`).join(''):`<div class="empty">No sessions yet — it will show up here once you log it in a workout.</div>`}
-    ${hist.length?`<button class="btn ghost" style="width:100%;margin-top:10px" data-action="ex-share" data-id="${exId}">Share this exercise with Claude</button>`:''}
+    ${hist.length?`<button class="btn ghost" style="width:100%;margin-top:10px" data-action="ex-share" data-id="${exId}">Share Exercise Log</button>`:''}
     ${isCustom?`<button class="btn danger" style="margin-top:8px" data-action="del-custom" data-id="${exId}">Delete custom exercise</button>`:''}`;
 }
 function customFormHTML(){
@@ -1299,7 +1310,7 @@ function workoutDetailHTML(id){
       <p class="tiny" style="margin:0;white-space:pre-wrap">${esc(w.notes)}</p></div>`:''}
     <div class="tiny muted num" style="margin-top:10px">Total volume: ${fmtVol(workoutVol(w))} ${unit()}</div>
     <button class="btn ghost sm" style="width:100%;margin-top:10px" data-action="w-savetpl" data-id="${w.id}">Save as a workout I can reuse</button>
-    <button class="btn ghost sm" style="width:100%;margin-top:8px" data-action="w-share" data-id="${w.id}">Share this workout with Claude</button>
+    <button class="btn ghost sm" style="width:100%;margin-top:8px" data-action="w-share" data-id="${w.id}">Share Workout Log</button>
     <div class="row" style="gap:8px;margin-top:8px">
       <button class="btn ghost sm" style="flex:1" data-action="w-copy" data-id="${w.id}">Copy</button>
       <button class="btn ghost sm" style="flex:1" data-action="w-edit" data-id="${w.id}">Edit</button>
@@ -1628,7 +1639,7 @@ function settingsHTML(){
     <div class="card"><div class="eyebrow" style="margin-bottom:8px">Your data</div>
       <p class="tiny muted" style="margin:0 0 10px">${state.workouts.length} workouts · ${state.templates.length} saved workouts · ${state.bodyweight.length} body-weight entries · ${state.custom.length} custom exercises. Data lives in this browser — export a backup to move devices.</p>
       <div class="stack">
-        <button class="btn ghost sm" data-action="coach-export">Share training log with Claude</button>
+        <button class="btn ghost sm" data-action="coach-export">Share Training Log</button>
         <button class="btn ghost sm" data-action="export">Export backup (.json)</button>
         <label class="btn ghost sm" style="cursor:pointer">Import backup<input type="file" accept=".json,application/json" id="importfile" hidden></label>
         <button class="btn danger sm" data-action="wipe">Erase all data</button>
@@ -1853,11 +1864,10 @@ const ACT={
   'sec-ex-move':el=>{arrMove(UI.builder.sections[+el.dataset.si].exs,+el.dataset.xi,+el.dataset.dir);$('#sheet').innerHTML=builderHTML();},
   'tg-sets':el=>{const{si,xi}=el.dataset,t=ensureTg(+si,+xi);
     t.sets=Math.max(1,Math.min(12,t.sets+ +el.dataset.dir));
-    $('#tgv-'+si+'-'+xi+'-s').textContent=t.sets;},
-  'tg-r':el=>{const{si,xi}=el.dataset,t=ensureTg(+si,+xi),ex=getEx(t.id);
-    const timed=ex&&(ex.t||ex.dist),step=timed?15:1;
-    t.r=Math.max(0,Math.min(timed?7200:100,t.r+step*(+el.dataset.dir)));
-    $('#tgv-'+si+'-'+xi+'-r').textContent=timed?fmtSec(t.r):t.r;},
+    $('#tgv-'+si+'-'+xi+'-s').value=t.sets;},
+  'tg-r':el=>{const{si,xi}=el.dataset,t=ensureTg(+si,+xi);
+    t.r=Math.max(0,Math.min(100,t.r+ +el.dataset.dir));
+    $('#tgv-'+si+'-'+xi+'-r').value=t.r;},
   'b-picker-done':()=>{const b=UI.builder;b.sections[b.cur].exs.push(...b.sel);
     b.sel=[];b.step=2;$('#sheet').innerHTML=builderHTML();},
   'b-tostep4':()=>{UI.builder.step=4;$('#sheet').innerHTML=builderHTML();},
@@ -2142,6 +2152,15 @@ document.addEventListener('input',e=>{
   if(!f)return;
   if(f==='w'||f==='r'||f==='dist'||f==='rmin'||f==='rsec')setVal(el.dataset.ei,el.dataset.si,f,el.value);
   else if(f==='wnotes'){if(state.active){state.active.notes=el.value;save();}}
+  else if(f==='tgsets'||f==='tgreps'||f==='tgmin'||f==='tgsec'){
+    const si=+el.dataset.si,xi=+el.dataset.xi,t=ensureTg(si,xi);
+    if(f==='tgsets'){const v=parseInt(el.value);if(!isNaN(v)&&v>=1)t.sets=Math.min(12,v);}
+    else if(f==='tgreps'){const v=parseInt(el.value);if(!isNaN(v)&&v>=0)t.r=Math.min(100,v);}
+    else{ // minutes and seconds combine into one target
+      const mn=Math.max(0,parseInt(($('#tgv-'+si+'-'+xi+'-m')||{}).value)||0);
+      const sc=Math.max(0,parseInt(($('#tgv-'+si+'-'+xi+'-sec')||{}).value)||0);
+      t.r=mn*60+sc;
+    }}
   else if(f==='rest'){const v=Math.round(parseFloat(el.value));
     if(!isNaN(v)&&v>=5&&v<=900){state.settings.rest[+el.dataset.i]=v;save();}}
   else if(f==='b-q'){UI.builder.q=el.value;const l=$('#pickerlist');if(l)l.innerHTML=pickerListHTML();}
