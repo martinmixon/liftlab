@@ -432,7 +432,7 @@ const LIB=[
   hands:PAIR_IDS.has(a[0])?2:1}));
 
 const GROUPS=['Chest','Back','Shoulders','Biceps','Triceps','Forearms','Quads','Hamstrings','Glutes','Calves','Core','Conditioning'];
-const EQUIPS=['Barbell','Dumbbell','Cable','Machine','Cardio','Bodyweight','Kettlebell','Other'];
+const EQUIPS=['Barbell','Dumbbell','Cable','Bands','Machine','Cardio','Bodyweight','Kettlebell','Other'];
 
 const TYPES=[
  {id:'upper',name:'Upper Body',d:'Chest, back, shoulders, arms',f:e=>e.r==='U'},
@@ -462,7 +462,7 @@ const secName=id=>{const s=SECTIONS.find(k=>k.id===id);return s?s.name:'';};
 const CARDIO_FILTER=e=>e.m.includes('Conditioning')||e.p.includes('cond'); // cardio section shows conditioning exercises regardless of workout type
 
 /* ============ state ============ */
-const APP_VERSION='1.22';
+const APP_VERSION='1.23';
 const DBKEY='liftlab.v1';
 const blank=()=>({settings:{units:'lbs',rest:[30,60,90]},custom:[],workouts:[],bodyweight:[],planned:[],templates:[],active:null});
 let state=blank();
