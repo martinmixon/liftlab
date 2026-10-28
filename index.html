@@ -462,7 +462,7 @@ const secName=id=>{const s=SECTIONS.find(k=>k.id===id);return s?s.name:'';};
 const CARDIO_FILTER=e=>e.m.includes('Conditioning')||e.p.includes('cond'); // cardio section shows conditioning exercises regardless of workout type
 
 /* ============ state ============ */
-const APP_VERSION='1.24';
+const APP_VERSION='1.25';
 const DBKEY='liftlab.v1';
 const blank=()=>({settings:{units:'lbs',rest:[30,60,90]},custom:[],workouts:[],bodyweight:[],planned:[],templates:[],active:null});
 let state=blank();
@@ -1262,9 +1262,22 @@ function templateDetailHTML(id){
         <button class="btn ghost" style="flex:1" data-action="tpl-sched" data-id="${t.id}">Schedule</button>
         <button class="btn ghost" style="flex:1" data-action="tpl-edit" data-id="${t.id}">Edit</button>
       </div>
-      <button class="btn ghost" data-action="tpl-dup" data-id="${t.id}">Duplicate</button>
+      <div class="row" style="gap:8px">
+        <button class="btn ghost" style="flex:1" data-action="tpl-dup" data-id="${t.id}">Duplicate</button>
+        <button class="btn ghost" style="flex:1" data-action="tpl-rename" data-id="${t.id}">Rename</button>
+      </div>
       <button class="btn danger" data-action="tpl-del" data-id="${t.id}">Delete</button>
     </div>`;
+}
+function tplRenameHTML(id){
+  const t=state.templates.find(x=>x.id===id); if(!t)return '';
+  return `<div class="grab"></div>
+    <div class="row" style="margin-bottom:4px"><button class="btn ghost sm" data-action="tpl-open" data-id="${t.id}">← Back</button></div>
+    <h2 class="display" style="margin:4px 0 14px">Rename workout</h2>
+    <div class="card"><div class="eyebrow" style="margin-bottom:8px">Name</div>
+      <input id="tpl-newname" type="text" value="${esc(t.name)}" maxlength="60"
+        autocomplete="off" aria-label="Workout name" placeholder="e.g. Leg Day B">
+      <button class="btn primary" style="margin-top:10px" data-action="tpl-rename-save" data-id="${t.id}">Save name</button></div>`;
 }
 function tplScheduleHTML(id){
   const t=state.templates.find(x=>x.id===id); if(!t)return '';
@@ -2034,6 +2047,13 @@ const ACT={
     state.templates.push({id:'t'+Date.now(),name,type:w.type||'full',sections:secs});
     save();closeSheet();UI.tab='home';UI.mode=null;render();toast('Duplicated as "'+name+'"');},
   'tpl-open':el=>openSheet(templateDetailHTML(el.dataset.id)),
+  'tpl-rename':el=>openSheet(tplRenameHTML(el.dataset.id)),
+  'tpl-rename-save':el=>{
+    const t=state.templates.find(x=>x.id===el.dataset.id); if(!t)return;
+    const v=(($('#tpl-newname')||{}).value||'').trim();
+    if(!v){toast('Give it a name');return;}
+    if(state.templates.some(x=>x.id!==t.id&&x.name===v)){toast('Another saved workout already has that name');return;}
+    t.name=v;save();render();openSheet(templateDetailHTML(t.id));toast('Renamed');},
   'tpl-dup':el=>{
     const t=state.templates.find(x=>x.id===el.dataset.id); if(!t)return;
     const copy={id:'t'+Date.now(),name:uniqueTplName(t.name),type:t.type,sections:cloneSecs(t.sections)};
@@ -2186,7 +2206,11 @@ document.addEventListener('input',e=>{
 document.addEventListener('pointermove',chartHover);
 document.addEventListener('pointerdown',chartHover);
 document.addEventListener('pointerout',chartLeave);
-window.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#sheetwrap').hidden)closeSheet();});
+window.addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&!$('#sheetwrap').hidden){closeSheet();return;}
+  if(e.key==='Enter'&&e.target&&e.target.id==='tpl-newname'){ // Enter commits the rename
+    const btn=$('[data-action="tpl-rename-save"]'); if(btn)btn.click();}
+});
 
 render();
 </script>
