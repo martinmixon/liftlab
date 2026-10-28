@@ -1,10 +1,15 @@
 // LiftLab service worker — app-shell cache so the app opens with no signal.
 // Bump CACHE on every deploy so clients pick up the new version.
-const CACHE = 'liftlab-v25';
+const CACHE = 'liftlab-v26';
 const ASSETS = ['./', 'index.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  e.waitUntil(
+    caches.open(CACHE)
+      .then(c => Promise.all(ASSETS.map(a =>
+        fetch(new Request(a, { cache: 'reload' })).then(r => c.put(a, r)))))
+      .then(() => self.skipWaiting())
+  );
 });
 self.addEventListener('activate', e => {
   e.waitUntil(
@@ -12,6 +17,10 @@ self.addEventListener('activate', e => {
       .then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
+});
+// the page can tell a waiting worker to take over immediately
+self.addEventListener('message', e => {
+  if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 // tapping a workout / timer notification returns to the running app
 self.addEventListener('notificationclick', e => {

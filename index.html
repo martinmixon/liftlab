@@ -462,7 +462,7 @@ const secName=id=>{const s=SECTIONS.find(k=>k.id===id);return s?s.name:'';};
 const CARDIO_FILTER=e=>e.m.includes('Conditioning')||e.p.includes('cond'); // cardio section shows conditioning exercises regardless of workout type
 
 /* ============ state ============ */
-const APP_VERSION='1.25';
+const APP_VERSION='1.26';
 const DBKEY='liftlab.v1';
 const blank=()=>({settings:{units:'lbs',rest:[30,60,90]},custom:[],workouts:[],bodyweight:[],planned:[],templates:[],active:null});
 let state=blank();
@@ -1668,7 +1668,10 @@ function settingsHTML(){
         <label class="btn ghost sm" style="cursor:pointer">Import backup<input type="file" accept=".json,application/json" id="importfile" hidden></label>
         <button class="btn danger sm" data-action="wipe">Erase all data</button>
       </div></div>
-    <p class="tiny muted" style="text-align:center;margin:16px 0 0">LiftLab · version ${APP_VERSION}</p>`;
+    <div style="text-align:center;margin:16px 0 0">
+      <p class="tiny muted" style="margin:0 0 8px">LiftLab · version ${APP_VERSION}</p>
+      <button class="btn ghost sm" data-action="check-update">Check for updates</button>
+    </div>`;
 }
 /* ============ chart engine (single-series line) ============ */
 const CHARTS={};
@@ -2136,6 +2139,7 @@ const ACT={
     const p=+el.dataset.p,i=state.settings.plates.findIndex(x=>Math.abs(x-p)<0.01);
     if(i>=0)state.settings.plates.splice(i,1); else state.settings.plates.push(p);
     state.settings.plates.sort((a,b)=>b-a);save();$('#sheet').innerHTML=plateSheetHTML();},
+  'check-update':()=>{toast('Checking…');checkForUpdate(true);},
   'coach-export':()=>{UI.expDays=28;openSheet(coachSheetHTML());},
   'w-share':el=>{const w=state.workouts.find(x=>x.id===el.dataset.id);
     if(w)shareText('LiftLab — '+w.name,workoutReport(w));},
@@ -2212,8 +2216,55 @@ window.addEventListener('keydown',e=>{
     const btn=$('[data-action="tpl-rename-save"]'); if(btn)btn.click();}
 });
 
+
+/* ============ keeping the installed app up to date ============
+   A home-screen PWA that resumes instead of navigating may never re-check sw.js,
+   so the app asks for itself: on load, on resume, and on demand from Settings. */
+let swReg=null,swReloading=false;
+function watchWorker(w){
+  if(!w)return;
+  w.addEventListener('statechange',()=>{
+    // a new worker parked in "installed" while one is already running = update ready
+    if(w.state==='installed'&&navigator.serviceWorker.controller){
+      toast('Updating…');
+      w.postMessage({type:'SKIP_WAITING'});
+    }
+  });
+}
+async function checkForUpdate(manual){
+  if(!swReg){if(manual)toast('Updates unavailable here');return false;}
+  try{
+    await swReg.update();
+    const pending=swReg.installing||swReg.waiting;
+    if(pending){
+      if(swReg.waiting)swReg.waiting.postMessage({type:'SKIP_WAITING'});
+      else watchWorker(swReg.installing);
+      if(manual)toast('Update found — reloading…');
+      return true;
+    }
+    if(manual)toast('You’re on the latest version ('+APP_VERSION+')');
+    return false;
+  }catch(_){if(manual)toast('Could not check right now');return false;}
+}
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('sw.js').then(reg=>{
+    swReg=reg;
+    watchWorker(reg.installing);
+    reg.addEventListener('updatefound',()=>watchWorker(reg.installing));
+    if(reg.waiting&&navigator.serviceWorker.controller)reg.waiting.postMessage({type:'SKIP_WAITING'});
+    checkForUpdate(false);
+  }).catch(()=>{});
+  // the new worker took control -> load the new code once
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{
+    if(swReloading)return;swReloading=true;location.reload();
+  });
+  // resuming the installed app is the case a plain navigation check misses
+  document.addEventListener('visibilitychange',()=>{
+    if(document.visibilityState==='visible')checkForUpdate(false);
+  });
+}
+
 render();
 </script>
-<script>if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js');</script>
 </body>
 </html>
