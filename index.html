@@ -170,7 +170,12 @@
   .setbtns .btn{padding:9px;font-size:13.5px;}
 
   /* workout sticky header */
-  #whead{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:linear-gradient(var(--bg) 78%,transparent);
+  /* header + rest bar pin together so the timers stay reachable while scrolling */
+  #wtop{position:sticky;top:0;z-index:6;background:var(--bg);
+    padding-top:env(safe-area-inset-top,0px);margin:0 -16px;padding-left:16px;padding-right:16px;
+    box-shadow:0 6px 12px -8px rgba(0,0,0,.9);}
+  #wrest{padding-bottom:12px;}
+  #whead{z-index:5;background:transparent;
     padding:12px 0 14px;display:flex;align-items:center;gap:10px;}
   #whead .mid{flex:1;min-width:0;}
   #whead .ttl{font-weight:800;font-size:16px;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -462,7 +467,7 @@ const secName=id=>{const s=SECTIONS.find(k=>k.id===id);return s?s.name:'';};
 const CARDIO_FILTER=e=>e.m.includes('Conditioning')||e.p.includes('cond'); // cardio section shows conditioning exercises regardless of workout type
 
 /* ============ state ============ */
-const APP_VERSION='1.26';
+const APP_VERSION='1.27';
 const DBKEY='liftlab.v1';
 const blank=()=>({settings:{units:'lbs',rest:[30,60,90]},custom:[],workouts:[],bodyweight:[],planned:[],templates:[],active:null});
 let state=blank();
@@ -524,12 +529,15 @@ function effTarget(x){ // target if set, else what the logger would default to
   const id=exIdOf(x),tg=exTgOf(x),ex=getEx(id),lp=ex?lastPerf(id):null;
   const sets=tg&&tg.sets?tg.sets:(lp?Math.min(Math.max(lp.sets.length,1),6):(ex&&ex.dist?1:3));
   const r=(tg&&tg.r!=null)?tg.r:(lp&&lp.sets[0]?lp.sets[0].r:(ex&&ex.dist?0:(ex&&ex.t?30:8)));
-  return{sets,r};
+  const w=(tg&&tg.w!=null)?tg.w:null;                    // null = fall back to last session
+  const lastW=lp&&lp.sets[0]?Math.max(...lp.sets.map(v=>v.w||0)):0;
+  return{sets,r,w,lastW};
 }
 const tgStr=x=>{const ex=getEx(exIdOf(x)),t=effTarget(x);
   if(!ex)return '';
-  if(!t.r)return t.sets+' set'+(t.sets===1?'':'s');
-  return t.sets+' × '+((ex.t||ex.dist)?fmtSec(t.r):t.r);};
+  const at=t.w!=null?' @ '+fmtW(t.w):'';
+  if(!t.r)return t.sets+' set'+(t.sets===1?'':'s')+at;
+  return t.sets+' × '+((ex.t||ex.dist)?fmtSec(t.r):t.r)+at;};
 function lastStr(e){
   const lp=lastPerf(e.id); if(!lp)return '';
   if(e.dist){const bd=Math.max(...lp.sets.map(s=>s.d||0));if(bd>0)return fmtDist(bd);
@@ -741,7 +749,15 @@ function builderHTML(){
           <input class="tvalin num" type="number" inputmode="numeric" min="0" max="100" step="1" value="${t.r}"
             id="tgv-${si}-${xi}-r" data-field="tgreps" data-si="${si}" data-xi="${xi}" aria-label="Target reps">
           <button class="tstep" data-action="tg-r" data-si="${si}" data-xi="${xi}" data-dir="1" aria-label="Increase reps">+</button>`}
-        </div></div>`;}).join('')}
+        </div>
+        ${(!e||e.dist||e.bw)?'':`<div class="tgrow">
+          <span class="tglbl">Weight</span>
+          <input class="tvalin num" style="width:60px" type="number" inputmode="decimal" step="any" min="0"
+            value="${t.w!=null?fmtN(dispW(t.w)):''}" placeholder="${t.lastW?fmtN(dispW(t.lastW)):'—'}"
+            id="tgv-${si}-${xi}-w" data-field="tgw" data-si="${si}" data-xi="${xi}" aria-label="Target weight">
+          <span class="tglbl">${unit()}</span>
+          <span class="tiny muted" style="margin-left:4px">${t.w!=null?'':(t.lastW?'last used':'set when logging')}</span>
+        </div>`}</div>`;}).join('')}
       <button class="btn ghost sm" style="margin-top:6px" data-action="sec-add-ex" data-si="${si}">+ Exercises</button>
     </div>`).join('')}
     <div class="card"><div class="eyebrow" style="margin-bottom:8px">Add a section</div>
@@ -874,7 +890,7 @@ function makeEntry(exId,group,tg){
   const lp=lastPerf(exId),rec=recommend(ex);
   const n=(tg&&tg.sets)?tg.sets:(lp?Math.min(Math.max(lp.sets.length,1),6):(ex.dist?1:3));
   const sets=Array.from({length:n},(_,k)=>{const prev=lp&&lp.sets[k];
-    return{w:ex.dist?0:(prev?prev.w:rec.w), // repeat last session set for set
+    return{w:ex.dist?0:((tg&&tg.w!=null)?tg.w:(prev?prev.w:rec.w)), // target weight wins, else repeat last session
       r:(tg&&tg.r!=null)?tg.r:(prev?prev.r:(ex.dist?0:(ex.t?30:8))),
       d:prev?(prev.d||0):0,done:false};});
   return{ex:exId,group:group||'',sets};
@@ -884,18 +900,19 @@ function makeEntry(exId,group,tg){
 function viewWorkout(){
   const a=state.active;
   return `
+  <div id="wtop">
   <div id="whead">
     <button class="iconbtn" data-action="minimize" aria-label="Minimize workout">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
     <div class="mid"><div class="ttl">${esc(a.name)}</div><div class="sub num" id="elapsed">${elapsedStr()}</div></div>
     <button class="btn primary sm" data-action="finish">Finish</button>
   </div>
-  <div class="chips" style="margin-bottom:14px">
+  <div class="chips" id="wrest">
     <span class="tiny muted" style="align-self:center">Rest:</span>
     ${state.settings.rest.map(sec=>`<button class="chip" data-action="rest" data-sec="${sec}">${fmtSec(sec)}</button>`).join('')}
     ${(a.entries.some(e=>e.sec==='emom')||a.struct==='emom')?`<button class="chip on" data-action="rest" data-sec="60" data-rep="1">EMOM ↻</button>`:''}
     ${a.entries.some(e=>e.sec==='amrap')?`<button class="chip on" data-action="amrap-open">AMRAP ⏱</button>`:''}
-  </div>
+  </div></div>
   ${(()=>{let last=null;return a.entries.map((en,ei)=>{
     const h=en.sec&&secKey(en)!==last?`<div class="eyebrow" style="margin:16px 0 8px;color:var(--brass)">${secName(en.sec)||esc(en.sec)}</div>`:'';
     last=secKey(en);return h+entryHTML(en,ei);}).join('');})()}
@@ -2193,9 +2210,12 @@ document.addEventListener('input',e=>{
   if(!f)return;
   if(f==='w'||f==='r'||f==='dist'||f==='rmin'||f==='rsec')setVal(el.dataset.ei,el.dataset.si,f,el.value);
   else if(f==='wnotes'){if(state.active){state.active.notes=el.value;save();}}
-  else if(f==='tgsets'||f==='tgreps'||f==='tgmin'||f==='tgsec'){
+  else if(f==='tgsets'||f==='tgreps'||f==='tgmin'||f==='tgsec'||f==='tgw'){
     const si=+el.dataset.si,xi=+el.dataset.xi,t=ensureTg(si,xi);
-    if(f==='tgsets'){const v=parseInt(el.value);if(!isNaN(v)&&v>=1)t.sets=Math.min(12,v);}
+    if(f==='tgw'){const raw=el.value.trim();
+      if(raw===''){delete t.w;}                       // blank = use last session's weight
+      else{const v=parseFloat(raw);if(!isNaN(v)&&v>=0)t.w=toCanon(v);}}
+    else if(f==='tgsets'){const v=parseInt(el.value);if(!isNaN(v)&&v>=1)t.sets=Math.min(12,v);}
     else if(f==='tgreps'){const v=parseInt(el.value);if(!isNaN(v)&&v>=0)t.r=Math.min(100,v);}
     else{ // minutes and seconds combine into one target
       const mn=Math.max(0,parseInt(($('#tgv-'+si+'-'+xi+'-m')||{}).value)||0);
